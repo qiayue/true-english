@@ -50,7 +50,10 @@ export function wordDiff(mine: string, ref: string): {
   while (i < a.length && j < b.length) {
     if (ka[i] === kb[j]) {
       ops.push({ type: 'equal', text: b[j]! });
-      hit++;
+      // 纯标点的 token（独立的破折号、项目符号）规范化后是空串。
+      // 它不进分母，就绝不能进分子 —— 否则 hit 会超过 total，
+      // 「写得和原文一模一样」也判不出写对，那一步永远过不去。
+      if (kb[j]!.length > 0) hit++;
       i++;
       j++;
     } else if (dp[i + 1]![j]! >= dp[i]![j + 1]!) {

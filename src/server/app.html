@@ -96,6 +96,9 @@ pre.payload{background:var(--surface);border:1px solid var(--rule);border-radius
   cursor:pointer;padding:.45rem .2rem;text-decoration:underline;text-underline-offset:3px}
 .link:hover{color:var(--ink)}
 .cue{font-size:.88rem;color:var(--soft);line-height:1.6}
+.ctx{font-family:var(--mono);font-size:.8rem;color:var(--faint);line-height:1.7;
+  padding-left:.7rem;border-left:2px solid var(--rule)}
+.ctx b{color:var(--soft);font-weight:400}
 .covered{background:repeating-linear-gradient(45deg,var(--surface-2),var(--surface-2) 6px,transparent 6px,transparent 12px);
   border:1px dashed var(--rule);border-radius:3px;padding:.7rem .85rem;
   font-size:.8rem;color:var(--faint);text-align:center;letter-spacing:.05em}
@@ -175,6 +178,7 @@ pre.payload{background:var(--surface);border:1px solid var(--rule);border-radius
     <!-- 阶梯模式：状态机驱动，一次只呈现一件该做的事 -->
     <div id="ladder" class="hidden" style="display:flex;flex-direction:column;gap:.9rem">
       <div id="step-dots" class="row" style="gap:.3rem"></div>
+      <div id="step-ctx" class="ctx hidden"></div>
       <div class="card">
         <span class="faint mono" style="font-size:.68rem;letter-spacing:.1em" id="step-label"></span>
         <div class="gloss" id="step-gloss"></div>
@@ -355,6 +359,7 @@ async function loadCards() {
   } catch (e) { showErr(el, e); }
 }
 let STEP = 0, HINT = 0, TRIES = 0, PHASE = 'write', COPY = false, LAST_DIFF = null;
+let DONE_EN = [];   // 已完成步骤的原文，用作后续步骤的上文语境
 
 async function openCard(id) {
   CARD = await call(`/api/cards/${id}/practice`);
@@ -368,6 +373,7 @@ async function openCard(id) {
   $('#pick').classList.add('hidden');
   $('#drill').classList.remove('hidden');
 
+  DONE_EN = [];
   const hasSteps = (CARD.steps ?? []).length > 0;
   $('#btn-mode-toggle').classList.toggle('hidden', !hasSteps);
   $('#mode-switch').innerHTML = hasSteps
@@ -421,7 +427,10 @@ function setPhase(p) {
   PHASE = p;
   const cfg = PHASES[p];
   $('#step-cue').innerHTML = cfg.cue + (TRIES > 1 && p !== 'hit' ? ` <span class="tries">第 ${TRIES} 次</span>` : '');
-  $('#btn-step-primary').textContent = cfg.primary;
+  // 最后一步的「下一步」通往整段模式，得说清楚，否则不知道接下来要干嘛
+  const last = CARD?.steps && STEP === CARD.steps.length - 1;
+  $('#btn-step-primary').textContent =
+    p === 'hit' && last ? '连起来写整条 →' : cfg.primary;
   // study 阶段没什么可打的，把输入框收起来，屏幕上只留「看」这一件事
   $('#step-input').classList.toggle('hidden', p === 'hit' || p === 'study');
   // 答案已经看过了就别再给提示，那是给还没看过的人的
@@ -443,6 +452,11 @@ function renderStep() {
   HINT = 0; TRIES = 0; COPY = false; LAST_DIFF = null;
   $('#step-dots').innerHTML = steps.map((_, i) =>
     `<span class="dot ${i < STEP ? 'done' : i === STEP ? 'cur' : ''}"></span>`).join('');
+  // 前面步骤的原文接起来当上文。这些你已经看过，不构成泄漏，
+  // 但没有它，同位语和延续型的步骤根本无从下笔 —— 你不知道自己是在接着谁写。
+  const ctx = DONE_EN.slice(0, STEP).filter(Boolean).join(' ');
+  $('#step-ctx').classList.toggle('hidden', ctx.length === 0);
+  if (ctx) $('#step-ctx').innerHTML = `<b>上文　</b>${esc(ctx)}`;
   $('#step-label').textContent = `第 ${STEP + 1} / ${steps.length} 步`;
   $('#step-gloss').textContent = steps[STEP].glossZh;
   $('#step-input').value = '';
@@ -455,12 +469,20 @@ function renderDiff(d) {
     o.type === 'equal' ? esc(o.text)
     : o.type === 'del' ? `<span class="del">${esc(o.text)}</span>`
     : `<span class="add">${esc(o.text)}</span>`).join(' ');
+  // 命中率只算原文的词，你多写的词不进分母。
+  // 于是「多写了 8 个词的另一种句式」可能显示成 6/7 —— 读起来像差不多对了，
+  // 其实结构差得很远。多写得多就必须明说，否则这个数字在骗人。
+  const extra = d.ops.filter((o) => o.type === 'del').length;
+  const misleading = extra >= Math.max(3, d.total * 0.5);
   $('#step-out').innerHTML = `<div class="card">
     <div class="row" style="justify-content:space-between">
       <span class="faint mono" style="font-size:.68rem;letter-spacing:.1em">对照</span>
-      <span class="mono" style="font-size:.8rem">命中 ${d.hit}/${d.total}</span></div>
+      <span class="mono" style="font-size:.8rem">命中 ${d.hit}/${d.total}${extra ? `　多写 ${extra}` : ''}</span></div>
     <div class="wd">${line}</div>
     <div class="split"><span class="t">原文</span><span class="mono qing">${esc(d.en)}</span></div>
+    ${misleading ? `<p class="zhu" style="font-size:.84rem">你多写了 ${extra} 个词。命中率只算原文的词，
+      多写的不进分母 —— 所以这个数字看着不低，但你的<strong>句子结构</strong>和原文差得比它显示的远。
+      对照时重点看结构，别看比例。</p>` : ''}
   </div>`;
 }
 
@@ -472,6 +494,7 @@ async function doCheck() {
     const d = await call(`/api/cards/${CARD.id}/steps/${STEP}/check`, { text });
     // 「写对」= 参考句每个词都命中，且没有多写 —— 大小写和标点已在服务端规范化
     const clean = d.hit === d.total && d.ops.every((o) => o.type !== 'del');
+    DONE_EN[STEP] = d.en;
     if (clean) {
       $('#step-out').innerHTML = `<div class="hit">
         <span class="qing"><strong>✓ 写对了</strong>${TRIES > 1 ? ` <span class="tries">练了 ${TRIES} 次</span>` : ''}</span>
