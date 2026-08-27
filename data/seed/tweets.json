@@ -1,0 +1,25 @@
+[
+  { "id": "s01", "text": "I used to think shipping fast was about typing fast. It's not. It's about having fewer things to decide." },
+  { "id": "s02", "text": "The hardest part of writing is not writing. It's deciding what the thing is actually about." },
+  { "id": "s03", "text": "Every time I skip the outline, I end up rewriting the whole thing twice." },
+  { "id": "s04", "text": "Nobody tells you that most of debugging is just reading your own code slowly." },
+  { "id": "s05", "text": "I'd push back on that a little. Small teams aren't faster because they're small. They're faster because they argue less." },
+  { "id": "s06", "text": "Turns out the bug was in the code I wrote to find the bug." },
+  { "id": "s07", "text": "I don't think tools make you productive. I think they make you feel productive, which is not the same thing." },
+  { "id": "s08", "text": "If you're rewriting it for the third time, the problem probably isn't the code." },
+  { "id": "s09", "text": "I'll take a boring codebase over a clever one any day." },
+  { "id": "s10", "text": "The thing about deadlines is they don't make you work faster. They make you cut things. Which is fine, as long as you know what you're cutting." },
+  { "id": "s11", "text": "I spent four hours on a problem that a five minute conversation would have solved." },
+  { "id": "s12", "text": "Most of my best decisions looked boring at the time." },
+  { "id": "s13", "text": "Writing things down isn't about remembering them. It's about finding out whether they make sense." },
+  { "id": "s14", "text": "I keep learning the same lesson: if it's hard to explain, I don't understand it yet." },
+  { "id": "s15", "text": "Reading code is a skill. We just never practice it on purpose." },
+
+  { "id": "x01", "text": "This is exactly it.", "why": "外指代词开头，在评论另一条推" },
+  { "id": "x02", "text": "@someone @another lol no, you're thinking of the other one", "why": "回复推 + 多个提及，缺上文" },
+  { "id": "x03", "text": "New post: why your retros are useless https://example.com/p/123", "why": "含链接，内容在推外" },
+  { "id": "x04", "text": "BREAKING: FED HOLDS RATES STEADY AMID INFLATION CONCERNS", "why": "标题体，省略冠词系动词，不是真语法" },
+  { "id": "x05", "text": "the way this absolutely sent me 💀💀💀 im deceased 😭😭", "why": "meme + emoji 过重" },
+  { "id": "x06", "text": "Epistemic humility is the tacit acknowledgement that one's doxastic commitments are perennially provisional.", "why": "生词率过高，远超 90% 法则" },
+  { "id": "x07", "text": "ship it", "why": "太短，不足以构成完整表达单元" }
+]

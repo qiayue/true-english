@@ -1,0 +1,23 @@
+{
+  "name": "true-english",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "用真实推文教中文母语者写英文",
+  "scripts": {
+    "diff": "tsx src/cli/diff.ts",
+    "card": "tsx src/cli/card.ts",
+    "score": "tsx src/cli/score.ts",
+    "eval": "tsx src/cli/eval.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.121.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

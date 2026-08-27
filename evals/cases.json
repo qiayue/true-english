@@ -1,0 +1,98 @@
+[
+  {
+    "id": "topic-prominent",
+    "note": "话题优先：中文的话题句被直译成英文，执行者没进主语位",
+    "original": "We'll ship this feature next week.",
+    "glossZh": "这个功能我们下周上线。",
+    "attempt": "This feature we will do next week.",
+    "expect": { "categories": ["structure"], "hasWrong": true }
+  },
+  {
+    "id": "comma-splice",
+    "note": "意合 → 形合：中文逗号串句直译成英文逗号粘连病句",
+    "original": "It's freezing, so I'm not going out.",
+    "glossZh": "天太冷了，我不想出门。",
+    "attempt": "It's very cold, I don't want to go out.",
+    "expect": { "categories": ["structure"], "hasWrong": true }
+  },
+  {
+    "id": "serial-verbs",
+    "note": "连动句：中文一串动词直译，英文一句只能有一个主动词",
+    "original": "I grabbed a coffee on my way back.",
+    "glossZh": "我去买了个咖啡回来喝。",
+    "attempt": "I go buy a coffee come back drink.",
+    "expect": { "categories": ["structure"], "hasWrong": true }
+  },
+  {
+    "id": "article-drop",
+    "note": "冠词漏用 —— 中文没有冠词这个语法范畴",
+    "original": "The bug was in the code I wrote to find the bug.",
+    "glossZh": "结果那个 bug 就在我为了找 bug 而写的代码里。",
+    "attempt": "Bug was in code I wrote to find bug.",
+    "expect": { "categories": ["leak"], "leaks": ["article"], "hasWrong": true }
+  },
+  {
+    "id": "tense-slip",
+    "note": "时态：中文没有形态标记，讲过去的事却用现在时",
+    "original": "I spent four hours on a problem that a five minute conversation would have solved.",
+    "glossZh": "我在一个问题上耗了四个小时，而这个问题聊五分钟就能解决。",
+    "attempt": "I spend four hours on a problem that a five minutes talk can solve.",
+    "expect": { "categories": ["leak"], "leaks": ["tense"], "hasWrong": true }
+  },
+  {
+    "id": "number-fewer",
+    "note": "单复数 + 可数不可数：less/fewer，thing/things",
+    "original": "It's about having fewer things to decide.",
+    "glossZh": "关键在于需要做的决定更少。",
+    "attempt": "It is about have less thing to decide.",
+    "expect": { "categories": ["leak"], "leaks": ["number"], "hasWrong": true }
+  },
+  {
+    "id": "preposition",
+    "note": "介词搭配 —— 中文母语者的终身漏点之一",
+    "original": "I'm really interested in how people learn.",
+    "glossZh": "我对人是怎么学东西的这件事特别感兴趣。",
+    "attempt": "I am very interested about how people study.",
+    "expect": { "categories": ["leak"], "leaks": ["preposition"], "hasWrong": true }
+  },
+  {
+    "id": "be-about",
+    "note": "词块：中文的「是」表示「关键在于」时不能直译成 is",
+    "original": "Writing things down isn't about remembering them. It's about finding out whether they make sense.",
+    "glossZh": "把事情写下来不是为了记住，是为了搞清楚它到底讲不讲得通。",
+    "attempt": "Write down things is not for remember. It is for know if it is reasonable.",
+    "expect": { "categories": ["chunk"], "hasWrong": true }
+  },
+  {
+    "id": "missing-hedge",
+    "note": "语气：原文用 most of 限定，学习者说死了",
+    "original": "Most of my best decisions looked boring at the time.",
+    "glossZh": "我那些最好的决定，当时看着都挺没意思的。",
+    "attempt": "All my best decisions are boring at that time.",
+    "expect": { "categories": ["tone"], "hasWrong": true }
+  },
+  {
+    "id": "equal-different-but-good",
+    "note": "★ 最关键的测试：学习者写法不同但同样地道。引擎必须敢给 equal，且不得判 wrong",
+    "original": "I'll take a boring codebase over a clever one any day.",
+    "glossZh": "让我选的话，我永远选无聊的代码库，不选炫技的。",
+    "attempt": "Given the choice, I'd always pick a boring codebase over a clever one.",
+    "expect": { "hasEqual": true, "noWrong": true }
+  },
+  {
+    "id": "near-perfect",
+    "note": "★ 学习者几乎完全写对。引擎不许为了凑数量硬造错误",
+    "original": "Most of my best decisions looked boring at the time.",
+    "glossZh": "我那些最好的决定，当时看着都挺没意思的。",
+    "attempt": "Most of my best decisions seemed boring at the time.",
+    "expect": { "noWrong": true }
+  },
+  {
+    "id": "agreement",
+    "note": "主谓一致",
+    "original": "Reading code is a skill. We just never practice it on purpose.",
+    "glossZh": "读代码是一项技能，我们只是从来没有刻意练过。",
+    "attempt": "Read code are a skill. We just never practice them purposely.",
+    "expect": { "categories": ["leak"], "leaks": ["agreement"], "hasWrong": true }
+  }
+]

@@ -1,0 +1,29 @@
+# 领域补充词表
+#
+# 通用词频表（OpenSubtitles / 电影对白）覆盖不到本项目刻意选取的推文题材：
+# 写工作、软件、产品、想法。这些词在对白里罕见，但对目标读者是常识词。
+#
+# 判定标准：一个会来用这个 app 的人（读技术/产品类推特的中文母语学习者）
+# 几乎必然认识它。不认识就不该收进来。
+#
+# 软件与工程
+api backend frontend bug bugs debug debugging deploy deployment repo repos
+codebase refactor refactoring commit commits merge branch database server
+framework library stack runtime compile compiler async cache caching
+config script query endpoint latency throughput scale scaling migration
+# 产品与工作
+product feature features roadmap backlog sprint retro retrospective standup
+launch shipping ship shipped startup startups founder founders cofounder
+freelance freelancing remote onboarding workflow workflows deadline deadlines
+stakeholder metric metrics dashboard prototype mvp iterate iteration
+# 写作与思考
+outline outlines draft drafts rewrite rewriting edit editing revise revision
+essay essays newsletter thread threads paragraph prose narrative
+argument premise assumption assumptions tradeoff tradeoffs constraint constraints
+framing nuance context perspective takeaway insight insights
+# 常见抽象/评价词（对白语料低频，书面表达高频）
+productive productivity efficient efficiency effective consistency consistent
+intentional deliberate incremental sustainable scalable robust fragile
+ambiguous ambiguity arbitrary explicit implicit granular
+underrated overrated overthink overthinking procrastinate procrastination
+burnout momentum leverage bandwidth alignment
