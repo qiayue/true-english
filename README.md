@@ -32,6 +32,22 @@ npm run diff -- \
 npm run eval
 ```
 
+不需要 API key 的部分：
+
+```bash
+# 灌入模拟数据，看整条链路长什么样
+npm run demo -- --db data/demo.db
+
+# 学习报告：个人错误模式分析
+npm run report -- --db data/demo.db
+
+# 语料库：按功能检索，不按话题
+npm run corpus -- --db data/demo.db --fn 反对
+
+# 检查一条仿写复用了哪些词块（铁律：至少 2 个）
+npm run corpus -- --db data/demo.db --check "I'd push back on that a little."
+```
+
 ## 文档
 
 - [方法论](docs/method.md) — 为什么这么学，以及完整的日/周循环、三阶段路线

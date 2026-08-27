@@ -9,7 +9,10 @@
     "card": "tsx src/cli/card.ts",
     "score": "tsx src/cli/score.ts",
     "eval": "tsx src/cli/eval.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "report": "tsx src/cli/report.ts",
+    "corpus": "tsx src/cli/corpus.ts",
+    "demo": "tsx src/cli/demo.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.121.0",
