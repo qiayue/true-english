@@ -174,6 +174,19 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // 浏览器总会去要 favicon，没有路由就是一条 404。
+  // 不是错误，但会污染日志、也会让冒烟测试的「无运行时错误」误报。
+  if (url.pathname === '/favicon.ico') {
+    res.writeHead(200, { 'content-type': 'image/svg+xml', 'cache-control': 'max-age=86400' });
+    res.end(
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">' +
+        '<rect width="32" height="32" rx="6" fill="#20252A"/>' +
+        '<text x="16" y="23" font-size="19" font-family="serif" fill="#B23A28" ' +
+        'text-anchor="middle">朱</text></svg>',
+    );
+    return;
+  }
+
   if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
     fs.createReadStream(HTML).pipe(res);

@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>true-english</title>
+<link rel="icon" href="/favicon.ico">
 <style>
 :root{
   --paper:#EBEEE9; --surface:#F6F7F4; --surface-2:#E2E7DE;
@@ -567,6 +568,91 @@ $('#btn-step-hint').onclick = async () => {
     $('#step-input').focus();
   } catch (e) { showErr($('#step-out'), e); }
 };
+
+$('#btn-back').onclick = () => {
+  $('#drill').classList.add('hidden'); $('#pick').classList.remove('hidden'); loadCards();
+};
+
+$('#btn-submit').onclick = async () => {
+  const res = $('#result'); const attempt = $('#attempt').value.trim();
+  if (!attempt) { res.innerHTML = '<div class="err">先写点什么再提交。</div>'; return; }
+  try {
+    if (AUTO) {
+      res.innerHTML = '<p>批改中…</p>';
+      renderReview(await call(`/api/cards/${CARD.id}/review`, { attempt }));
+    } else {
+      const r = await call(`/api/cards/${CARD.id}/grade-request`, { attempt });
+      PENDING = { cardId: r.cardId, attempt: r.attempt };
+      $('#grade-payload').textContent = r.payload;
+      $('#grade-manual').classList.remove('hidden');
+      res.innerHTML = '';
+      $('#grade-payload').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  } catch (e) { showErr(res, e); }
+};
+$('#btn-copy-grade').onclick = (e) => copy($('#grade-payload').textContent, e.target);
+$('#btn-import-grade').onclick = async () => {
+  const res = $('#result');
+  try {
+    renderReview(await call('/api/reviews/import', { ...PENDING, json: $('#grade-json').value }));
+    $('#grade-manual').classList.add('hidden');
+  } catch (e) { showErr(res, e); }
+};
+
+function renderReview(d) {
+  const r = d.review;
+  const pct = r.overlap.total > 0 ? Math.round(r.overlap.matched / r.overlap.total * 100) : 0;
+  const leaks = {};
+  r.items.forEach((i) => { if (i.leak) leaks[i.leak] = (leaks[i.leak] ?? 0) + 1; });
+
+  let h = `<div style="display:flex;flex-direction:column;gap:1.1rem;margin-top:.5rem">`;
+  h += `<div class="card">
+    <div class="split"><span class="t">你写的</span><span class="mono zhu">${esc($('#attempt').value.trim())}</span></div>
+    <div class="split"><span class="t">原文</span><span class="mono qing">${esc(d.original)}</span></div>
+  </div>`;
+  h += `<div><div class="row" style="justify-content:space-between">
+      <span class="faint mono" style="font-size:.7rem;letter-spacing:.1em">回译重合度</span>
+      <span class="mono"><b>${pct}%</b> <span class="faint">${r.overlap.matched}/${r.overlap.total} 意义单元</span></span>
+    </div><div class="bar" style="margin-top:.35rem"><i style="width:${pct}%"></i></div></div>`;
+  if (Object.keys(leaks).length) {
+    h += `<div class="mono" style="font-size:.82rem"><span class="faint">硬伤　</span>` +
+      Object.entries(leaks).sort((a,b)=>b[1]-a[1]).map(([k,v]) => `<span class="zhu">${LEAK[k]??k} ×${v}</span>`).join('　') + `</div>`;
+  }
+  if (r.items.length) {
+    h += '<div>';
+    r.items.forEach((it) => {
+      h += `<div class="diff ${esc(it.verdict)}">
+        <div class="hd"><span class="tag">${CATEGORY[it.category] ?? it.category}${it.leak ? ' · ' + (LEAK[it.leak] ?? it.leak) : ''}</span>
+          <span class="mono" style="font-size:.76rem">${VERDICT[it.verdict] ?? it.verdict}</span></div>
+        <div class="split"><span class="t">你</span><span class="mono zhu">${esc(it.mine)}</span></div>
+        <div class="split"><span class="t">原</span><span class="mono qing">${esc(it.native)}</span></div>
+        <div class="ex">${esc(it.explainZh)}</div>
+        ${it.rule ? `<div class="rule">规则 · ${esc(it.rule)}</div>` : ''}
+      </div>`;
+    });
+    h += '</div>';
+  }
+  if (r.strengths?.length) {
+    h += `<div class="ok"><strong>做对的地方</strong><br>` +
+      r.strengths.map((s) => '· ' + esc(s)).join('<br>') + `</div>`;
+  }
+  if (r.verdictZh) h += `<p style="color:var(--ink)"><strong>总评</strong>　${esc(r.verdictZh)}</p>`;
+
+  if (d.frames?.length) {
+    h += `<div class="card"><span class="faint mono" style="font-size:.68rem;letter-spacing:.1em">句型骨架 · 当天就用它说 3 件你自己的事</span>` +
+      d.frames.map((f) => `<div><span class="mono" style="color:#8A6D1F">${esc(f.pattern)}</span>
+        <span class="faint" style="font-size:.82rem"> [${esc(f.fn)}] ${esc(f.gloss_zh)}</span></div>`).join('') + `</div>`;
+  }
+  if (d.chunks?.length) {
+    h += `<div class="card"><span class="faint mono" style="font-size:.68rem;letter-spacing:.1em">词块 · 已入库</span>` +
+      d.chunks.map((c) => `<div><span class="mono qing">${esc(c.text)}</span>
+        <span class="faint" style="font-size:.82rem"> [${esc(c.fn)}] ${esc(c.gloss_zh)}</span></div>`).join('') + `</div>`;
+  }
+  h += '</div>';
+  $('#result').innerHTML = h;
+}
+
+window.__render = renderReview;
 
 // ── 语料库 ──
 let FN = '';
