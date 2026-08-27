@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { scoreDifficulty } from '../core/difficulty.js';
+import { cleanPaste } from '../core/paste.js';
 import { makeCard, review } from '../core/review.js';
 import {
   saveCard, saveAttempt, saveReview, saveComposition,
@@ -8,6 +9,8 @@ import {
   recordStep, todayView, type StepOutcome,
 } from '../core/store.js';
 import { wordDiff, hint, type HintLevel } from '../core/steps.js';
+import { loadConfig, publicConfig, saveConfig, clearKey, type LlmConfig } from '../core/settings.js';
+import { ping } from '../core/llm.js';
 import { FUNCTIONS, type Fn } from '../core/taxonomy.js';
 import type { Card } from '../core/types.js';
 
@@ -17,46 +20,88 @@ export class ApiError extends Error {
   }
 }
 
-/**
- * 把粘贴进来的一大段文本切成若干条推文。
- *
- * 支持两种分隔：空行（从推特复制多条时最常见），
- * 以及单行但明显是独立句群的情况。宁可切多也不要粘连 ——
- * 粘连会让难度打分把两条推当一条，误判成「太长」。
- */
-export function splitTweets(raw: string): string[] {
-  return raw
-    .split(/\n\s*\n+/)
-    .map((s) =>
-      s
-        .split('\n')
-        .map((l) => l.trim())
-        .filter(Boolean)
-        .join(' ')
-        .trim(),
-    )
-    .filter((s) => s.length > 0);
+export function hasCredentials(db: DatabaseSync): boolean {
+  return publicConfig(db).ready;
 }
 
-export function hasCredentials(): boolean {
-  return !!(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_PROFILE);
+// ─────────────────────────────────────────────
+// LLM 接入设置
+// ─────────────────────────────────────────────
+
+export function getSettings(db: DatabaseSync) {
+  return publicConfig(db);
+}
+
+export function putSettings(db: DatabaseSync, patch: Partial<LlmConfig>) {
+  if (patch.baseUrl !== undefined && patch.baseUrl && !/^https?:\/\//.test(patch.baseUrl)) {
+    throw new ApiError('API 地址要以 http:// 或 https:// 开头');
+  }
+  saveConfig(db, patch);
+  return publicConfig(db);
+}
+
+export function dropKey(db: DatabaseSync) {
+  clearKey(db);
+  return publicConfig(db);
+}
+
+/** 连通性自检。把失败原因原样带回去 —— 配错了不给具体原因就只能瞎猜。 */
+export async function testSettings(db: DatabaseSync) {
+  try {
+    const r = await ping(loadConfig(db));
+    return { ok: true as const, reply: r.reply };
+  } catch (e) {
+    return { ok: false as const, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/**
+ * 拉端点上可用的模型列表。
+ *
+ * OpenAI 兼容端点都有 GET /models。OpenRouter 还会在每个模型上带
+ * supported_parameters，能看出它支不支持 structured_outputs ——
+ * 不支持也能用（会降级成把 schema 写进 prompt），但支持的更稳，
+ * 所以要在界面上标出来让用户自己权衡。
+ */
+export async function listModels(db: DatabaseSync) {
+  const c = loadConfig(db);
+  if (!/^https?:\/\//.test(c.baseUrl)) throw new ApiError('API 地址不对');
+  const res = await fetch(`${c.baseUrl}/models`, {
+    headers: c.apiKey ? { authorization: `Bearer ${c.apiKey}` } : {},
+  });
+  if (!res.ok) throw new ApiError(`拉取模型列表失败：${res.status} ${res.statusText}`);
+  const json = (await res.json()) as {
+    data?: { id?: string; name?: string; supported_parameters?: string[] }[];
+  };
+  const models = (json.data ?? [])
+    .filter((m) => typeof m.id === 'string')
+    .map((m) => ({
+      id: m.id!,
+      name: m.name ?? m.id!,
+      structured: (m.supported_parameters ?? []).includes('structured_outputs'),
+    }));
+  return { models, total: models.length };
 }
 
 /** 投料：切分 + 90% 法则筛选。不调 LLM，粘贴后立刻出结果。 */
 export function ingest(raw: string) {
-  const tweets = splitTweets(raw);
-  if (tweets.length === 0) throw new ApiError('没有解析出任何推文');
-  return tweets.map((text) => ({ text, difficulty: scoreDifficulty(text) }));
+  const { tweets, removed } = cleanPaste(raw);
+  if (tweets.length === 0) {
+    throw new ApiError(
+      removed > 0
+        ? `清掉 ${removed} 行界面噪音之后什么都不剩了。是不是只复制到了用户名和互动数？`
+        : '没有解析出任何推文。',
+    );
+  }
+  return { removed, tweets: tweets.map((text) => ({ text, difficulty: scoreDifficulty(text) })) };
 }
 
 /** 生成卡片并入库。需要 LLM。 */
 export async function createCard(db: DatabaseSync, text: string, author?: string): Promise<Card> {
-  const card = await makeCard({
-    id: randomUUID().slice(0, 8),
-    text,
-    author,
-    capturedAt: new Date().toISOString(),
-  });
+  const card = await makeCard(
+    { id: randomUUID().slice(0, 8), text, author, capturedAt: new Date().toISOString() },
+    loadConfig(db),
+  );
   saveCard(db, card);
   return card;
 }
@@ -168,7 +213,10 @@ export async function submitAttempt(db: DatabaseSync, cardId: string, attemptTex
   const attemptId = `att_${randomUUID().slice(0, 8)}`;
   saveAttempt(db, { id: attemptId, cardId, text, createdAt: new Date().toISOString() });
 
-  const r = await review({ original: card.original, attempt: text, glossZh: card.glossZh });
+  const r = await review(
+    { original: card.original, attempt: text, glossZh: card.glossZh },
+    loadConfig(db),
+  );
   saveReview(db, attemptId, r);
 
   return {

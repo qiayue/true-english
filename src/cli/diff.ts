@@ -8,7 +8,9 @@ import fs from 'node:fs';
 import { review } from '../core/review.js';
 import { renderReview } from './render.js';
 import { parseArgs, die } from './args.js';
-import { MissingKeyError } from '../core/llm.js';
+import { loadConfig } from '../core/settings.js';
+import { open, DEFAULT_DB } from '../core/store.js';
+import { ConfigError } from '../core/llm.js';
 
 const args = parseArgs(process.argv.slice(2));
 
@@ -34,9 +36,9 @@ if (!original || !attempt) {
 }
 
 try {
-  const r = await review({ original, attempt, glossZh: gloss });
+  const r = await review({ original, attempt, glossZh: gloss }, loadConfig(open(String(args.db ?? DEFAULT_DB))));
   console.log(renderReview(r, original, attempt));
 } catch (e) {
-  if (e instanceof MissingKeyError) die(e.message);
+  if (e instanceof ConfigError) die(e.message);
   throw e;
 }

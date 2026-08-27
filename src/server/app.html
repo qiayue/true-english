@@ -108,6 +108,16 @@ pre.payload{background:var(--surface);border:1px solid var(--rule);border-radius
 .hit{border-left:3px solid var(--qing);background:var(--qing-wash);padding:.6rem .85rem;
   display:flex;flex-direction:column;gap:.3rem}
 .seam{height:1px;background:var(--rule)}
+.flabel{display:block;font-size:.82rem;font-weight:600;margin-bottom:.3rem}
+.hint{font-size:.8rem;color:var(--faint);margin-top:.3rem}
+.hint code{font-family:var(--mono);background:var(--surface-2);padding:.05em .3em;border-radius:2px}
+.mlist{max-height:14rem;overflow:auto;border:1px solid var(--rule);border-radius:3px;
+  margin-top:.5rem;background:var(--surface)}
+.mrow{display:flex;justify-content:space-between;gap:.7rem;align-items:center;width:100%;
+  padding:.4rem .6rem;background:none;border:none;border-bottom:1px solid var(--rule-soft);
+  font-family:var(--mono);font-size:.76rem;color:var(--ink);cursor:pointer;text-align:left}
+.mrow:hover{background:var(--surface-2)}
+.mrow em{font-style:normal;font-size:.68rem;color:var(--qing);white-space:nowrap}
 .stepnum{display:flex;align-items:center;gap:.55rem;font-weight:600;font-size:.98rem}
 .stepnum>span{display:grid;place-items:center;width:1.4rem;height:1.4rem;border-radius:50%;
   background:var(--ink);color:var(--paper);font-family:var(--mono);font-size:.75rem;flex-shrink:0}
@@ -139,12 +149,14 @@ pre.payload{background:var(--surface);border:1px solid var(--rule);border-radius
   <button data-tab="practice">练习</button>
   <button data-tab="corpus">语料库</button>
   <button data-tab="report">报告</button>
+  <button data-tab="settings">设置</button>
 </nav>
 
 <!-- ─────────── 投料 ─────────── -->
 <section class="panel sel" id="p-ingest">
   <h2>粘贴推文</h2>
-  <p>一条一段，空行分隔。粘进来先过 90% 法则筛选 —— 这步不调 API，立刻出结果。</p>
+  <p>可以一次粘多条，空行分隔。<strong>直接从推特整块复制就行</strong> ——
+     用户名、时间、互动数这些界面噪音会自动清掉。粘进来先过 90% 法则筛选，这步不调 API，立刻出结果。</p>
   <textarea id="raw" rows="8" placeholder="I used to think shipping fast was about typing fast. It's not. It's about having fewer things to decide.&#10;&#10;Most of my best decisions looked boring at the time."></textarea>
   <div class="row">
     <button class="act" id="btn-ingest">筛选</button>
@@ -245,6 +257,51 @@ pre.payload{background:var(--surface);border:1px solid var(--rule);border-radius
   </div>
 </section>
 
+<!-- ─────────── 设置 ─────────── -->
+<section class="panel" id="p-settings">
+  <h2>LLM 接入</h2>
+  <p>走 OpenAI 兼容协议 —— OpenRouter、本地 Ollama、任何兼容端点都行。
+     不配也能用，那就是<strong>手工批改模式</strong>：页面导出请求，你贴给任意一个 Claude 会话。</p>
+
+  <div class="card" style="gap:.9rem">
+    <div>
+      <label class="flabel" for="set-base">API 地址</label>
+      <input id="set-base" placeholder="https://openrouter.ai/api/v1">
+      <p class="hint">不要带 <code>/chat/completions</code>，只到 <code>/v1</code>。</p>
+    </div>
+
+    <div>
+      <label class="flabel" for="set-key">API Key</label>
+      <input id="set-key" type="password" autocomplete="off" placeholder="sk-or-v1-…">
+      <p class="hint" id="key-hint"></p>
+    </div>
+
+    <div>
+      <label class="flabel" for="set-model">模型 ID</label>
+      <input id="set-model" placeholder="anthropic/claude-sonnet-4.5">
+      <div class="row" style="margin-top:.45rem">
+        <button class="link" id="btn-fetch-models">拉取这个端点上的模型列表</button>
+      </div>
+      <div id="model-list"></div>
+    </div>
+
+    <div class="row">
+      <button class="act" id="btn-save-settings">保存</button>
+      <button class="act ghost" id="btn-test-settings">测试连接</button>
+      <button class="link" id="btn-clear-key">清除 Key</button>
+    </div>
+    <div id="settings-out"></div>
+  </div>
+
+  <div class="card">
+    <h2 style="font-size:.95rem">也可以用环境变量</h2>
+    <pre class="payload" style="max-height:none">LLM_BASE_URL=https://openrouter.ai/api/v1
+LLM_API_KEY=sk-or-v1-...
+LLM_MODEL=anthropic/claude-sonnet-4.5</pre>
+    <p class="hint">界面里存的设置优先于环境变量 —— 改了就该立刻生效，不该被启动时的环境变量盖掉。</p>
+  </div>
+</section>
+
 <!-- ─────────── 语料库 ─────────── -->
 <section class="panel" id="p-corpus">
   <h2>语料库</h2>
@@ -304,29 +361,45 @@ $$('nav button').forEach((b) => b.onclick = () => {
   if (b.dataset.tab === 'practice') loadCards();
   if (b.dataset.tab === 'corpus') loadCorpus();
   if (b.dataset.tab === 'report') loadReport();
+  if (b.dataset.tab === 'settings') loadSettings();
 });
 
 // ── 投料 ──
-let SELECTED = [];
+let SELECTED = [], ALL_TWEETS = [];
+
+function syncPicked() {
+  SELECTED = [...document.querySelectorAll('.pick')]
+    .filter((c) => c.checked)
+    .map((c) => ALL_TWEETS[Number(c.dataset.i)].text);
+  const n = SELECTED.length;
+  $('#card-flow').classList.toggle('hidden', n === 0);
+  $('#card-count').textContent = `选中 ${n} 条，将为它们生成中文 gloss、句型骨架和词块。`;
+  $('#btn-card-auto').disabled = !AUTO;
+}
 $('#btn-ingest').onclick = async () => {
   const out = $('#ingest-out');
   try {
-    const { tweets } = await call('/api/ingest', { text: $('#raw').value });
-    SELECTED = tweets.filter((t) => t.difficulty.usable).map((t) => t.text);
-    out.innerHTML = tweets.map((t) => {
+    const { tweets, removed } = await call('/api/ingest', { text: $('#raw').value });
+    // 通过筛选的默认勾上，但可以取消 —— 不该替用户决定今天练哪几条
+    out.innerHTML = tweets.map((t, i) => {
       const d = t.difficulty;
-      const mk = d.usable ? '<span class="qing">✓</span>' : '<span class="zhu">✗</span>';
-      return `<div class="item" style="cursor:default">
-        <span class="mk">${mk}</span>
-        <span><span class="mono">${esc(t.text)}</span><br>
-        <span class="faint" style="font-size:.82rem">${esc(d.reason)}</span></span></div>`;
+      return d.usable
+        ? `<label class="item" style="cursor:pointer">
+             <input type="checkbox" class="pick" data-i="${i}" checked style="width:auto;margin-top:.3rem">
+             <span><span class="mono">${esc(t.text)}</span><br>
+             <span class="faint" style="font-size:.82rem">${esc(d.reason)}</span></span></label>`
+        : `<div class="item" style="cursor:default;opacity:.6">
+             <span class="mk zhu">✗</span>
+             <span><span class="mono">${esc(t.text)}</span><br>
+             <span class="faint" style="font-size:.82rem">${esc(d.reason)}</span></span></div>`;
     }).join('');
-    const n = SELECTED.length;
-    $('#ingest-hint').textContent = `${n}/${tweets.length} 条通过`;
-    $('#card-flow').classList.toggle('hidden', n === 0);
-    $('#card-count').textContent = `${n} 条通过筛选，将为它们生成中文 gloss、句型骨架和词块。`;
-    $('#btn-card-auto').disabled = !AUTO;
-    $('#btn-card-auto').title = AUTO ? '' : '未检测到 API key';
+    ALL_TWEETS = tweets;
+    out.querySelectorAll('.pick').forEach((c) => c.onchange = syncPicked);
+    syncPicked();
+    const usable = tweets.filter((t) => t.difficulty.usable).length;
+    $('#ingest-hint').innerHTML = `${usable}/${tweets.length} 条通过` +
+      (removed ? `　<span class="faint">（清掉了 ${removed} 行界面噪音）</span>` : '');
+    $('#btn-card-auto').title = AUTO ? '' : '还没配 LLM，去「设置」';
   } catch (e) { showErr(out, e); }
 };
 
@@ -912,14 +985,98 @@ async function loadReport() {
   } catch (e) { showErr(out, e); }
 }
 
-// ── init ──
-call('/api/health').then((h) => {
+// ── 设置 ──
+let MODELS = [];
+
+async function loadSettings() {
+  try {
+    const c = await call('/api/settings');
+    $('#set-base').value = c.baseUrl ?? '';
+    $('#set-model').value = c.model ?? '';
+    // key 只写不读：服务端从不回传它，这里只显示有没有、大概长什么样
+    $('#set-key').value = '';
+    $('#key-hint').innerHTML = c.hasKey
+      ? `已保存 <span class="mono">${esc(c.keyHint)}</span>　<span class="faint">留空表示不改</span>`
+      : '<span class="zhu">还没配</span>　不配就是手工批改模式';
+  } catch (e) { showErr($('#settings-out'), e); }
+}
+
+$('#btn-save-settings').onclick = async () => {
+  const out = $('#settings-out');
+  try {
+    const c = await call('/api/settings', {
+      baseUrl: $('#set-base').value.trim(),
+      apiKey: $('#set-key').value.trim(),
+      model: $('#set-model').value.trim(),
+    });
+    out.innerHTML = c.ready
+      ? '<div class="ok">保存好了。建议点一下「测试连接」确认真的能通。</div>'
+      : '<div class="err">保存了，但还差东西：' +
+        (c.hasKey ? '' : 'API Key ') + (c.model ? '' : '模型 ID ') + '没填。</div>';
+    await loadSettings();
+    await refreshMode();
+  } catch (e) { showErr(out, e); }
+};
+
+$('#btn-test-settings').onclick = async () => {
+  const out = $('#settings-out');
+  out.innerHTML = '<p>测试中…</p>';
+  try {
+    const r = await call('/api/settings/test', {});
+    out.innerHTML = r.ok
+      ? `<div class="ok">通了。模型回了：<span class="mono">${esc(r.reply)}</span></div>`
+      : `<div class="err"><strong>没通</strong><br>${esc(r.error)}</div>`;
+    await refreshMode();
+  } catch (e) { showErr(out, e); }
+};
+
+$('#btn-clear-key').onclick = async () => {
+  try { await call('/api/settings/clear-key', {}); await loadSettings(); await refreshMode();
+        $('#settings-out').innerHTML = '<div class="ok">Key 已清除，回到手工批改模式。</div>'; }
+  catch (e) { showErr($('#settings-out'), e); }
+};
+
+$('#btn-fetch-models').onclick = async () => {
+  const out = $('#model-list');
+  out.innerHTML = '<p class="hint">拉取中…</p>';
+  try {
+    const r = await call('/api/settings/models', {});
+    MODELS = r.models;
+    // 支持结构化输出的排前面：不支持也能用（会降级成把 schema 写进 prompt），
+    // 但支持的更稳，值得让用户一眼看见。
+    MODELS.sort((a, b) => (b.structured ? 1 : 0) - (a.structured ? 1 : 0) || a.id.localeCompare(b.id));
+    renderModels('');
+  } catch (e) { showErr(out, e); }
+};
+
+function renderModels(filter) {
+  const out = $('#model-list');
+  const f = filter.trim().toLowerCase();
+  const hit = MODELS.filter((m) => !f || m.id.toLowerCase().includes(f)).slice(0, 60);
+  out.innerHTML =
+    `<p class="hint">共 ${MODELS.length} 个，<span class="qing">带 ✓ 的原生支持结构化输出</span>，
+      其余会降级成把 schema 写进 prompt（也能用，稳定性差一点）。在上面的输入框里打字可以筛选。</p>
+     <div class="mlist">${hit.map((m) => `<button class="mrow" data-id="${esc(m.id)}">
+       <span>${esc(m.id)}</span>${m.structured ? '<em>✓ 结构化</em>' : ''}</button>`).join('')}</div>`;
+  out.querySelectorAll('.mrow').forEach((b) => b.onclick = () => {
+    $('#set-model').value = b.dataset.id;
+    out.innerHTML = '<p class="hint">选好了，记得点「保存」。</p>';
+  });
+}
+
+$('#set-model').addEventListener('input', () => { if (MODELS.length) renderModels($('#set-model').value); });
+
+async function refreshMode() {
+  const h = await call('/api/health');
   AUTO = h.hasKey;
   const b = $('#mode');
   b.textContent = h.hasKey ? '自动批改' : '手工批改模式';
   b.classList.toggle('on', h.hasKey);
   $('#btn-card-auto').disabled = !h.hasKey;
-});
+}
+
+// ── init ──
+void refreshMode();
 </script>
 </body>
 </html>

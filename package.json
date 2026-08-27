@@ -17,14 +17,13 @@
     "seed:example": "node scripts/seed-example.mjs",
     "shot": "node scripts/screenshot.mjs",
     "start": "tsx src/server/index.ts",
-    "check": "node scripts/check-ui.mjs && tsc --noEmit && tsx tests/schedule.ts",
+    "check": "node scripts/check-ui.mjs && tsc --noEmit && npm run test",
     "smoke": "node scripts/smoke.mjs",
-    "test": "tsx tests/schedule.ts"
+    "test": "tsx tests/schedule.ts && tsx tests/paste.ts && tsx tests/llm.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.121.0",
-    "zod": "^4.0.0",
-    "tsx": "^4.19.2"
+    "tsx": "^4.19.2",
+    "zod": "^4.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

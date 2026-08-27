@@ -74,8 +74,9 @@ async function route(req: http.IncomingMessage, url: URL): Promise<unknown> {
   const m = req.method ?? 'GET';
 
   if (m === 'GET' && pathname === '/api/health') {
-    return { hasKey: api.hasCredentials(), db: DB_FILE };
+    return { hasKey: api.hasCredentials(db), db: DB_FILE };
   }
+  if (m === 'GET' && pathname === '/api/settings') return api.getSettings(db);
   if (m === 'GET' && pathname === '/api/cards') return { cards: api.listCards(db) };
   if (m === 'GET' && pathname === '/api/corpus') {
     return api.corpus(db, url.searchParams.get('fn') ?? undefined);
@@ -94,7 +95,18 @@ async function route(req: http.IncomingMessage, url: URL): Promise<unknown> {
   if (m === 'POST') {
     const body = await readBody(req);
 
-    if (pathname === '/api/ingest') return { tweets: api.ingest(str(body.text, 'text')) };
+    if (pathname === '/api/settings') {
+      return api.putSettings(db, {
+        ...(typeof body.baseUrl === 'string' ? { baseUrl: body.baseUrl } : {}),
+        ...(typeof body.apiKey === 'string' ? { apiKey: body.apiKey } : {}),
+        ...(typeof body.model === 'string' ? { model: body.model } : {}),
+      });
+    }
+    if (pathname === '/api/settings/test') return api.testSettings(db);
+    if (pathname === '/api/settings/models') return api.listModels(db);
+    if (pathname === '/api/settings/clear-key') return api.dropKey(db);
+
+    if (pathname === '/api/ingest') return api.ingest(str(body.text, 'text'));
 
     if (pathname === '/api/cards/request') return api.cardRequest(strArray(body.texts, 'texts'));
     if (pathname === '/api/cards/import') {
@@ -240,7 +252,7 @@ server.on('error', (e: NodeJS.ErrnoException) => {
 });
 
 server.listen(PORT, BIND_HOST, () => {
-  const mode = api.hasCredentials() ? '自动批改' : '手工批改（未检测到 API key）';
+  const mode = api.hasCredentials(db) ? '自动批改' : '手工批改（未配置 LLM）';
   console.log(`\n  true-english  ·  ${mode}`);
   console.log(`  http://localhost:${PORT}`);
   console.log(`  数据库 ${DB_FILE}`);

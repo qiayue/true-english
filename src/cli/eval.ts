@@ -11,7 +11,9 @@ import { review } from '../core/review.js';
 import type { ReviewOut } from '../core/schema.js';
 import { C } from './render.js';
 import { parseArgs, die } from './args.js';
-import { MissingKeyError } from '../core/llm.js';
+import { loadConfig } from '../core/settings.js';
+import { open, DEFAULT_DB } from '../core/store.js';
+import { ConfigError } from '../core/llm.js';
 
 interface Expect {
   categories?: string[];
@@ -63,6 +65,7 @@ function check(c: Case, r: ReviewOut): { fails: string[]; warns: string[] } {
 }
 
 const args = parseArgs(process.argv.slice(2));
+const CONFIG = loadConfig(open(typeof args.db === 'string' ? args.db : DEFAULT_DB));
 const cases: Case[] = JSON.parse(fs.readFileSync('evals/cases.json', 'utf8'));
 const todo = typeof args.only === 'string' ? cases.filter((c) => c.id === args.only) : cases;
 if (todo.length === 0) die(`没有匹配的用例：${args.only}`);
@@ -72,10 +75,10 @@ const results: { c: Case; fails: string[]; warns: string[]; err?: string; r?: Re
 
 async function runOne(c: Case) {
   try {
-    const r = await review({ original: c.original, attempt: c.attempt, glossZh: c.glossZh });
+    const r = await review({ original: c.original, attempt: c.attempt, glossZh: c.glossZh }, CONFIG);
     results.push({ c, r, ...check(c, r) });
   } catch (e) {
-    if (e instanceof MissingKeyError) throw e;
+    if (e instanceof ConfigError) throw e;
     results.push({ c, fails: [], warns: [], err: e instanceof Error ? e.message : String(e) });
   }
 }
@@ -88,7 +91,7 @@ try {
     }),
   );
 } catch (e) {
-  if (e instanceof MissingKeyError) die(e.message);
+  if (e instanceof ConfigError) die(e.message);
   throw e;
 }
 

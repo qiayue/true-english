@@ -42,7 +42,9 @@ PORT=5300 npm run dev
 
 ## 用法
 
-1. **投料** —— 粘贴推文（一条一段，空行分隔）。立刻过 90% 法则筛选，不调 API。
+1. **投料** —— 一次可以粘多条，空行分隔。**直接从推特整块复制就行**，
+   用户名、时间、互动数这些界面噪音会自动清掉。立刻过 90% 法则筛选，不调 API，
+   通过的可以自己勾选要哪几条。
 2. **做成卡片** —— 生成中文 gloss、句型骨架、词块。
 3. **练习** —— 只给你看中文，凭中文翻回英文。
    英文原文在服务端，提交前不下发到浏览器 —— **偷看的成本不是零，这是故意的**。
@@ -55,8 +57,25 @@ PORT=5300 npm run dev
 
 | | 何时用 | 怎么用 |
 |---|---|---|
-| **自动** | 设了 `ANTHROPIC_API_KEY` | 直接提交，等结果 |
-| **手工** | 没有 key | 页面导出一份完整请求 → 贴给任意 Claude 会话 → 把返回的 JSON 贴回来 |
+| **自动** | 在「设置」里配了 LLM | 直接提交，等结果 |
+| **手工** | 没配 | 页面导出一份完整请求 → 贴给任意 Claude 会话 → 把返回的 JSON 贴回来 |
+
+### 配 LLM
+
+走 **OpenAI 兼容协议**，不绑任何一家的 SDK —— OpenRouter、本地 Ollama、
+任何兼容端点都行，换供应商只改配置不改代码。
+
+在「设置」里填三样：API 地址、API Key、模型 ID。可以点「拉取模型列表」
+从端点直接选，**带 ✓ 的原生支持结构化输出**；不支持的也能用，会自动降级成
+把 schema 写进 prompt（稳定性差一点）。填完点「测试连接」确认真的能通。
+
+也可以用环境变量（界面里的设置优先）：
+
+```bash
+LLM_BASE_URL=https://openrouter.ai/api/v1
+LLM_API_KEY=sk-or-v1-...
+LLM_MODEL=anthropic/claude-sonnet-4.5
+```
 
 手工模式不是临时补丁，是正式路径。它同时也是 prompt 的调试通道 ——
 你能看到引擎实际被喂了什么。串卡片粘贴会被拦下（批改里引用的英文对不上本卡原文时报错）。
@@ -64,6 +83,8 @@ PORT=5300 npm run dev
 ## 命令行
 
 ```bash
+npm run check                                    # 静态检查 + 类型 + 全部单元测试
+npm run smoke                                    # 30 项端到端（需先 npm run dev）
 npm run score  -- --file data/seed/tweets.json   # 90% 法则筛选，不调 API
 npm run demo   -- --db data/demo.db              # 灌模拟数据
 npm run report -- --db data/demo.db              # 学习报告

@@ -44,6 +44,10 @@ CREATE TABLE IF NOT EXISTS diff_items (
   mine TEXT, native TEXT, category TEXT NOT NULL, verdict TEXT NOT NULL,
   leak TEXT, explain_zh TEXT, rule TEXT
 );
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+
 -- 步骤级练习进度。间隔重复的数据基础。
 -- 原来 TRIES 只活在浏览器内存里，刷新就没 —— 于是「今天错三次的那一步，
 -- 明后天再推给你」这件事根本无从谈起。

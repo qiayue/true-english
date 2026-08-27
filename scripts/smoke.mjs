@@ -51,9 +51,16 @@ p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
 await p.goto(B); await p.waitForTimeout(400);
 
 // ── 投料 ──
-await p.fill('#raw', TWEET + '\n\nBREAKING: FED HOLDS RATES STEADY AMID INFLATION CONCERNS');
+// 按真实粘贴的样子来：带用户名、时间、互动数
+await p.fill('#raw', [
+  'Cloudflare', '@Cloudflare', '·', '2h', TWEET, '1.2K', '340', 'Show more',
+  '', 'BREAKING: FED HOLDS RATES STEADY AMID INFLATION CONCERNS',
+].join('\n'));
 await p.click('#btn-ingest'); await p.waitForTimeout(600);
-check('投料筛选', (await p.textContent('#ingest-hint')).includes('1/2'));
+const hint = await p.textContent('#ingest-hint');
+check('投料筛选', hint.includes('1/2'), hint);
+check('清掉了界面噪音', hint.includes('界面噪音'), hint);
+check('通过的可勾选', (await p.locator('#raw ~ * .pick, #ingest-out .pick').count()) === 1);
 check('导出卡片请求', await p.click('#btn-card-manual').then(() => p.waitForTimeout(400))
   .then(async () => (await p.textContent('#card-payload')).length > 100));
 

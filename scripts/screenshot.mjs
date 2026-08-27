@@ -7,7 +7,7 @@
  *   node scripts/screenshot.mjs            截全部
  *   node scripts/screenshot.mjs today      只截某一个
  *
- * 场景：today / write / retry / recall / review / finish
+ * 场景：settings / today / write / retry / recall / review / finish
  * 输出到 /tmp/shots/
  */
 import { chromium } from 'playwright';
@@ -30,6 +30,8 @@ const shot = async (name) => {
 };
 
 await p.goto(B); await p.waitForTimeout(400);
+await p.click('nav button[data-tab="settings"]'); await p.waitForTimeout(600);
+await shot('settings');
 await p.click('nav button[data-tab="practice"]'); await p.waitForTimeout(800);
 await shot('today');
 

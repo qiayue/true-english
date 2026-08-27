@@ -9,7 +9,9 @@ import { makeCard } from '../core/review.js';
 import { scoreDifficulty } from '../core/difficulty.js';
 import { renderCard, renderDifficulty, C } from './render.js';
 import { parseArgs, die } from './args.js';
-import { MissingKeyError } from '../core/llm.js';
+import { loadConfig } from '../core/settings.js';
+import { open, DEFAULT_DB } from '../core/store.js';
+import { ConfigError } from '../core/llm.js';
 
 const args = parseArgs(process.argv.slice(2));
 
@@ -40,18 +42,16 @@ if (!d.usable && !args.force) {
 }
 
 try {
-  const card = await makeCard({
-    id,
-    text,
-    author,
-    capturedAt: new Date().toISOString(),
-  });
+  const card = await makeCard(
+    { id, text, author, capturedAt: new Date().toISOString() },
+    loadConfig(open(String(args.db ?? DEFAULT_DB))),
+  );
   console.log(renderCard(card));
   if (args.json) {
     fs.writeFileSync(String(args.json), JSON.stringify(card, null, 2));
     console.log(`${C.gray}已写入 ${args.json}${C.reset}\n`);
   }
 } catch (e) {
-  if (e instanceof MissingKeyError) die(e.message);
+  if (e instanceof ConfigError) die(e.message);
   throw e;
 }
