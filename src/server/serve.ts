@@ -85,6 +85,11 @@ async function route(req: http.IncomingMessage, url: URL): Promise<unknown> {
   const practice = pathname.match(/^\/api\/cards\/([\w-]+)\/practice$/);
   if (m === 'GET' && practice) return api.practiceCard(db, practice[1]!);
 
+  const hintM = pathname.match(/^\/api\/cards\/([\w-]+)\/steps\/(\d+)\/hint$/);
+  if (m === 'GET' && hintM) {
+    return api.stepHint(db, hintM[1]!, Number(hintM[2]), Number(url.searchParams.get('level') ?? 1));
+  }
+
   if (m === 'POST') {
     const body = await readBody(req);
 
@@ -100,6 +105,9 @@ async function route(req: http.IncomingMessage, url: URL): Promise<unknown> {
       for (const t of texts) cards.push(await api.createCard(db, t));
       return { cards };
     }
+
+    const stepM = pathname.match(/^\/api\/cards\/([\w-]+)\/steps\/(\d+)\/check$/);
+    if (stepM) return api.checkStep(db, stepM[1]!, Number(stepM[2]), str(body.text, 'text'));
 
     const grade = pathname.match(/^\/api\/cards\/([\w-]+)\/grade-request$/);
     if (grade) return api.gradingRequest(db, grade[1]!, str(body.attempt, 'attempt'));

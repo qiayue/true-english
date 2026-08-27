@@ -20,6 +20,10 @@ CREATE TABLE IF NOT EXISTS cards (
   id TEXT PRIMARY KEY, tweet_id TEXT NOT NULL, gloss_zh TEXT NOT NULL,
   level INTEGER, coverage REAL, created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS steps (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, card_id TEXT NOT NULL,
+  idx INTEGER NOT NULL, gloss_zh TEXT NOT NULL, en TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS frames (
   id INTEGER PRIMARY KEY AUTOINCREMENT, card_id TEXT NOT NULL,
   pattern TEXT NOT NULL, fn TEXT NOT NULL, gloss_zh TEXT
@@ -44,6 +48,7 @@ CREATE TABLE IF NOT EXISTS diff_items (
 CREATE TABLE IF NOT EXISTS compositions (
   id TEXT PRIMARY KEY, text TEXT NOT NULL, posted INTEGER DEFAULT 0, created_at TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_steps_card ON steps(card_id, idx);
 CREATE INDEX IF NOT EXISTS idx_chunks_fn ON chunks(fn);
 CREATE INDEX IF NOT EXISTS idx_frames_fn ON frames(fn);
 CREATE INDEX IF NOT EXISTS idx_diff_leak ON diff_items(leak);
@@ -69,12 +74,22 @@ export function saveCard(db: DatabaseSync, card: Card): void {
     'INSERT OR REPLACE INTO cards (id, tweet_id, gloss_zh, level, coverage, created_at) VALUES (?,?,?,?,?,?)',
   ).run(card.id, card.tweet.id, card.glossZh, card.difficulty.level, card.difficulty.coverage, card.createdAt);
 
+  db.prepare('DELETE FROM steps WHERE card_id = ?').run(card.id);
+  const sIns = db.prepare('INSERT INTO steps (card_id, idx, gloss_zh, en) VALUES (?,?,?,?)');
+  card.steps.forEach((st, i) => sIns.run(card.id, i, st.glossZh, st.en));
+
   db.prepare('DELETE FROM frames WHERE card_id = ?').run(card.id);
   db.prepare('DELETE FROM chunks WHERE card_id = ?').run(card.id);
   const fIns = db.prepare('INSERT INTO frames (card_id, pattern, fn, gloss_zh) VALUES (?,?,?,?)');
   for (const f of card.frames) fIns.run(card.id, f.pattern, f.fn, f.glossZh);
   const cIns = db.prepare('INSERT INTO chunks (card_id, text, fn, gloss_zh, example) VALUES (?,?,?,?,?)');
   for (const c of card.chunks) cIns.run(card.id, c.text, c.fn, c.glossZh, c.example);
+}
+
+export function stepsOf(db: DatabaseSync, cardId: string) {
+  return db
+    .prepare('SELECT idx, gloss_zh AS glossZh, en FROM steps WHERE card_id = ? ORDER BY idx')
+    .all(cardId) as unknown as { idx: number; glossZh: string; en: string }[];
 }
 
 export function saveAttempt(db: DatabaseSync, a: Attempt): void {

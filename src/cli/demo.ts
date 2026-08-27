@@ -22,6 +22,10 @@ const TWEETS = [
     id: 'd1',
     text: "It's about having fewer things to decide.",
     glossZh: '关键在于需要做的决定更少。',
+    steps: [
+      { glossZh: '关键在于', en: "It's about" },
+      { glossZh: '需要做的决定更少。', en: 'having fewer things to decide.' },
+    ],
     frames: [{ pattern: "It's about ___.", fn: '强调' as const, glossZh: '点出「关键在于什么」' }],
     chunks: [
       { text: 'be about X', fn: '强调' as const, glossZh: '关键在于 X', example: "It's about having fewer things to decide." },
@@ -55,6 +59,7 @@ for (const t of TWEETS) {
     id: `card_${t.id}`,
     tweet: { id: t.id, text: t.text, capturedAt: new Date().toISOString() },
     glossZh: t.glossZh,
+    steps: t.steps ?? [],
     frames: t.frames,
     chunks: t.chunks,
     difficulty: scoreDifficulty(t.text),

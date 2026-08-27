@@ -42,8 +42,22 @@ export const ChunkSchema = z.object({
   example: z.string().describe('它在原推里的实际用法，原样摘录'),
 });
 
+/**
+ * 阶梯的一步。
+ *
+ * 一次性面对整段是初学者弃坑的主要原因 —— 认知负荷太高，
+ * 还没开始产出就已经放弃了。拆成小步，每一步都是能完成的产出。
+ */
+export const StepSchema = z.object({
+  glossZh: z.string().describe('这一步的中文，同样必须是自然中文'),
+  en: z.string().describe('这一步对应的英文，从原推里原样摘录，拼起来要能还原全文'),
+});
+
 export const CardSchema = z.object({
   glossZh: z.string().describe('自然中文，不能是英文的逐字对译'),
+  steps: z
+    .array(StepSchema)
+    .describe('把整条推文拆成 2-6 个递进小步，按原文顺序，拼起来能还原全文'),
   frames: z.array(FrameSchema),
   chunks: z.array(ChunkSchema),
 });

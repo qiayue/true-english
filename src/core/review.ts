@@ -28,6 +28,7 @@ export async function makeCard(tweet: Tweet): Promise<Card> {
     id: `card_${tweet.id}`,
     tweet,
     glossZh: out.glossZh,
+    steps: out.steps,
     frames: out.frames,
     chunks: out.chunks,
     difficulty,

@@ -4,8 +4,9 @@ import { scoreDifficulty } from '../core/difficulty.js';
 import { makeCard, review } from '../core/review.js';
 import {
   saveCard, saveAttempt, saveReview, saveComposition,
-  detectReuse, chunksByFn, framesByFn, progress,
+  detectReuse, chunksByFn, framesByFn, progress, stepsOf,
 } from '../core/store.js';
+import { wordDiff, hint, type HintLevel } from '../core/steps.js';
 import { FUNCTIONS, type Fn } from '../core/taxonomy.js';
 import type { Card } from '../core/types.js';
 
@@ -93,7 +94,41 @@ export function practiceCard(db: DatabaseSync, id: string) {
     .prepare('SELECT id, gloss_zh AS glossZh, level FROM cards WHERE id = ?')
     .get(id) as unknown as { id: string; glossZh: string; level: number } | undefined;
   if (!row) throw new ApiError('卡片不存在', 404);
-  return row;
+  // 阶梯同样只下发中文。en 留在服务端，对照时才逐步放出。
+  const steps = stepsOf(db, id).map((s) => ({ idx: s.idx, glossZh: s.glossZh }));
+  return { ...row, steps };
+}
+
+function stepAt(db: DatabaseSync, cardId: string, idx: number) {
+  const st = stepsOf(db, cardId).find((s) => s.idx === idx);
+  if (!st) throw new ApiError('这一步不存在', 404);
+  return st;
+}
+
+/**
+ * 阶梯的一步：机械逐词对照，**不调 LLM**。
+ *
+ * 两个理由。工程上：手工批改模式下一张卡 5 步就是 5 次复制粘贴往返，
+ * 不可接受。教学上：小步的作用是建立手感和降低起步门槛，
+ * 真正产生洞察的地方是最后把整条拼起来那一次 —— 那一次才走完整批改。
+ *
+ * 注意返回的是「对照」不是「判定」：逐词比对分不出「错」和「一样好」。
+ */
+export function checkStep(db: DatabaseSync, cardId: string, idx: number, text: string) {
+  const st = stepAt(db, cardId, idx);
+  const t = text.trim();
+  if (!t) throw new ApiError('这一步还没写');
+  const d = wordDiff(t, st.en);
+  return { idx, en: st.en, ...d };
+}
+
+export function stepHint(db: DatabaseSync, cardId: string, idx: number, level: number) {
+  const st = stepAt(db, cardId, idx);
+  const lv = (level >= 1 && level <= 3 ? level : 1) as HintLevel;
+  const chunks = chunksByFn(db)
+    .filter((c) => cardOwns(db, cardId, 'chunks', c.id))
+    .map((c) => ({ text: c.text, glossZh: c.gloss_zh }));
+  return { idx, level: lv, ...hint(lv, st.en, chunks) };
 }
 
 /** 提交回译 → 批改 → 入库。批改完成后英文原文、骨架、词块才一并放出。 */
@@ -301,6 +336,7 @@ export function importCards(db: DatabaseSync, texts: string[], raw: string): Car
       id: `card_${id}`,
       tweet: { id, text, capturedAt: new Date().toISOString() },
       glossZh: c.glossZh,
+      steps: c.steps,
       frames: c.frames,
       chunks: c.chunks,
       difficulty: scoreDifficulty(text),

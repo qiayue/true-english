@@ -40,12 +40,20 @@ export interface Chunk {
   example: string;
 }
 
+/** 阶梯的一步：中文提示 + 对应的英文原文片段 */
+export interface Step {
+  glossZh: string;
+  en: string;
+}
+
 /** 每日卡片 */
 export interface Card {
   id: string;
   tweet: Tweet;
   /** 中文意思 —— 学习者据此回译，看不到英文原文 */
   glossZh: string;
+  /** 阶梯拆解。空数组表示这张卡只能整段写 */
+  steps: Step[];
   frames: Frame[];
   chunks: Chunk[];
   difficulty: Difficulty;
