@@ -1,0 +1,523 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>true-english</title>
+<style>
+:root{
+  --paper:#EBEEE9; --surface:#F6F7F4; --surface-2:#E2E7DE;
+  --ink:#20252A; --soft:#5C6670; --faint:#818C93;
+  --zhu:#B23A28; --zhu-wash:#F0E0DB;
+  --qing:#1E5F58; --qing-wash:#DCE7E2;
+  --rule:#D2D8CF; --rule-soft:#E0E5DC;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;
+}
+@media (prefers-color-scheme:dark){:root{
+  --paper:#15181A; --surface:#1C2124; --surface-2:#22282B;
+  --ink:#E3E7E2; --soft:#98A2A6; --faint:#7B858A;
+  --zhu:#E37963; --zhu-wash:#2E2220;
+  --qing:#63B5A6; --qing-wash:#1A2725;
+  --rule:#2C3336; --rule-soft:#242A2D;
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
+  font-size:15px;line-height:1.7;-webkit-font-smoothing:antialiased}
+.wrap{max-width:46rem;margin:0 auto;padding:0 1.1rem 5rem}
+header{display:flex;align-items:baseline;gap:.7rem;flex-wrap:wrap;padding:1.6rem 0 .9rem}
+h1{font-size:1.15rem;margin:0;letter-spacing:.02em;font-weight:600}
+.badge{font-family:var(--mono);font-size:.68rem;letter-spacing:.06em;padding:.15rem .45rem;
+  border:1px solid var(--rule);border-radius:2px;color:var(--faint)}
+.badge.on{color:var(--qing);border-color:var(--qing)}
+nav{display:flex;gap:0;border-bottom:1px solid var(--rule);margin-bottom:1.4rem;overflow-x:auto}
+nav button{background:none;border:none;border-bottom:2px solid transparent;color:var(--faint);
+  font-family:inherit;font-size:.9rem;padding:.6rem .9rem;cursor:pointer;white-space:nowrap}
+nav button.sel{color:var(--ink);border-bottom-color:var(--zhu);font-weight:600}
+nav button:hover{color:var(--ink)}
+.panel{display:none;flex-direction:column;gap:1.1rem}
+.panel.sel{display:flex}
+h2{font-size:1rem;margin:0;font-weight:600}
+p{margin:0;color:var(--soft);font-size:.9rem}
+textarea,input{width:100%;font-family:var(--mono);font-size:.86rem;line-height:1.65;
+  background:var(--surface);color:var(--ink);border:1px solid var(--rule);border-radius:3px;
+  padding:.7rem .8rem;resize:vertical}
+textarea:focus,input:focus{outline:2px solid var(--qing);outline-offset:-1px;border-color:transparent}
+button.act{font-family:inherit;font-size:.88rem;padding:.45rem 1rem;border-radius:3px;cursor:pointer;
+  background:var(--ink);color:var(--paper);border:1px solid var(--ink)}
+button.act:hover{opacity:.85}
+button.act:disabled{opacity:.4;cursor:not-allowed}
+button.ghost{background:none;color:var(--ink);border:1px solid var(--rule)}
+.row{display:flex;gap:.55rem;flex-wrap:wrap;align-items:center}
+.card{background:var(--surface);border:1px solid var(--rule);border-radius:3px;padding:.85rem 1rem;
+  display:flex;flex-direction:column;gap:.5rem}
+.mono{font-family:var(--mono);font-size:.85rem}
+.zhu{color:var(--zhu)} .qing{color:var(--qing)} .faint{color:var(--faint)}
+.tag{font-family:var(--mono);font-size:.66rem;letter-spacing:.04em;padding:.08rem .35rem;
+  border:1px solid var(--rule);border-radius:2px;color:var(--faint);white-space:nowrap}
+.err{border-left:3px solid var(--zhu);background:var(--zhu-wash);padding:.6rem .85rem;
+  font-size:.88rem;white-space:pre-wrap}
+.ok{border-left:3px solid var(--qing);background:var(--qing-wash);padding:.6rem .85rem;font-size:.88rem}
+.list{display:flex;flex-direction:column;gap:.5rem}
+.item{background:var(--surface);border:1px solid var(--rule);border-radius:3px;padding:.65rem .85rem;
+  display:flex;gap:.7rem;align-items:flex-start;cursor:pointer;text-align:left;width:100%;
+  font-family:inherit;font-size:.9rem;color:var(--ink);line-height:1.6}
+.item:hover{border-color:var(--qing)}
+.item .mk{font-family:var(--mono);font-size:.72rem;flex-shrink:0;padding-top:.15rem}
+.gloss{font-size:1.05rem;line-height:1.8;font-weight:500}
+.diff{border-left:3px solid var(--rule);padding:.15rem 0 .15rem .8rem;display:flex;
+  flex-direction:column;gap:.15rem;margin-bottom:.9rem}
+.diff.wrong{border-left-color:var(--zhu)}
+.diff.unnatural{border-left-color:#C9962F}
+.diff.equal{border-left-color:var(--qing)}
+.diff .hd{display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;margin-bottom:.2rem}
+.diff .ex{font-size:.88rem;color:var(--soft);margin-top:.25rem}
+.diff .rule{font-size:.85rem;color:#8A6D1F;margin-top:.2rem}
+@media (prefers-color-scheme:dark){.diff .rule{color:#D6B45C}.diff.unnatural{border-left-color:#D6B45C}}
+.bar{height:5px;background:var(--surface-2);border-radius:3px;overflow:hidden}
+.bar>i{display:block;height:100%;background:var(--qing)}
+.stat{display:flex;gap:1.3rem;flex-wrap:wrap;align-items:baseline}
+.stat b{font-size:1.5rem;font-weight:600}
+.split{display:grid;grid-template-columns:2.4rem 1fr;gap:.5rem;align-items:baseline}
+.split .t{font-family:var(--mono);font-size:.7rem;color:var(--faint)}
+pre.payload{background:var(--surface);border:1px solid var(--rule);border-radius:3px;
+  padding:.7rem .8rem;font-family:var(--mono);font-size:.7rem;line-height:1.55;
+  max-height:12rem;overflow:auto;white-space:pre-wrap;word-break:break-word;margin:0}
+.steps{counter-reset:s;display:flex;flex-direction:column;gap:.75rem}
+.step{display:grid;grid-template-columns:1.5rem 1fr;gap:.6rem;align-items:baseline}
+.step .n{font-family:var(--mono);font-size:.75rem;color:var(--qing)}
+.hidden{display:none !important}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>true-english</h1>
+  <span class="badge" id="mode">…</span>
+</header>
+
+<nav>
+  <button data-tab="ingest" class="sel">投料</button>
+  <button data-tab="practice">练习</button>
+  <button data-tab="corpus">语料库</button>
+  <button data-tab="report">报告</button>
+</nav>
+
+<!-- ─────────── 投料 ─────────── -->
+<section class="panel sel" id="p-ingest">
+  <h2>粘贴推文</h2>
+  <p>一条一段，空行分隔。粘进来先过 90% 法则筛选 —— 这步不调 API，立刻出结果。</p>
+  <textarea id="raw" rows="8" placeholder="I used to think shipping fast was about typing fast. It's not. It's about having fewer things to decide.&#10;&#10;Most of my best decisions looked boring at the time."></textarea>
+  <div class="row">
+    <button class="act" id="btn-ingest">筛选</button>
+    <span class="faint mono" id="ingest-hint"></span>
+  </div>
+  <div id="ingest-out" class="list"></div>
+
+  <div id="card-flow" class="hidden" style="display:flex;flex-direction:column;gap:.9rem">
+    <div class="card">
+      <h2>把选中的推文做成卡片</h2>
+      <p id="card-count" class="faint"></p>
+      <div class="row">
+        <button class="act" id="btn-card-auto">自动生成</button>
+        <button class="act ghost" id="btn-card-manual">手工模式：导出请求</button>
+      </div>
+      <div id="card-manual" class="hidden" style="display:flex;flex-direction:column;gap:.6rem">
+        <div class="steps">
+          <div class="step"><span class="n">1</span><span>复制下面这段，发给任意一个 Claude 会话</span></div>
+          <div class="step"><span class="n">2</span><span>把它返回的 JSON 数组粘回最下面的框</span></div>
+        </div>
+        <pre class="payload" id="card-payload"></pre>
+        <div class="row"><button class="act ghost" id="btn-copy-card">复制请求</button></div>
+        <textarea id="card-json" rows="5" placeholder="把 Claude 返回的 JSON 数组粘在这里"></textarea>
+        <div class="row"><button class="act" id="btn-import-card">导入卡片</button></div>
+      </div>
+      <div id="card-msg"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────── 练习 ─────────── -->
+<section class="panel" id="p-practice">
+  <div id="pick">
+    <h2>选一张卡片</h2>
+    <p>练习时只给你看中文。英文原文在服务端，提交前不会发到浏览器 —— 偷看的成本不是零，这是故意的。</p>
+    <div id="card-list" class="list" style="margin-top:.9rem"></div>
+  </div>
+
+  <div id="drill" class="hidden" style="display:flex;flex-direction:column;gap:1.1rem">
+    <div class="row">
+      <button class="act ghost" id="btn-back">← 换一张</button>
+      <span class="tag" id="drill-level"></span>
+    </div>
+    <div class="card">
+      <span class="faint mono" style="font-size:.68rem;letter-spacing:.1em">中文意思</span>
+      <div class="gloss" id="drill-gloss"></div>
+    </div>
+    <div>
+      <span class="faint mono" style="font-size:.68rem;letter-spacing:.1em">把它翻回英文</span>
+      <textarea id="attempt" rows="4" style="margin-top:.35rem" placeholder="凭中文写，别去搜原文"></textarea>
+    </div>
+    <div class="row">
+      <button class="act" id="btn-submit">提交批改</button>
+      <span class="faint mono" id="submit-hint"></span>
+    </div>
+
+    <div id="grade-manual" class="hidden" style="display:flex;flex-direction:column;gap:.6rem">
+      <div class="steps">
+        <div class="step"><span class="n">1</span><span>复制下面这段，发给任意一个 Claude 会话</span></div>
+        <div class="step"><span class="n">2</span><span>把它返回的 JSON 粘回最下面的框</span></div>
+      </div>
+      <pre class="payload" id="grade-payload"></pre>
+      <div class="row"><button class="act ghost" id="btn-copy-grade">复制请求</button></div>
+      <textarea id="grade-json" rows="5" placeholder="把 Claude 返回的 JSON 粘在这里"></textarea>
+      <div class="row"><button class="act" id="btn-import-grade">导入批改</button></div>
+    </div>
+
+    <div id="result"></div>
+  </div>
+</section>
+
+<!-- ─────────── 语料库 ─────────── -->
+<section class="panel" id="p-corpus">
+  <h2>语料库</h2>
+  <p>按<strong>功能</strong>索引，不按话题。写作时你的检索请求是「我想礼貌地反对」，不是「找个科技词」。</p>
+  <div class="row" id="fn-filter"></div>
+  <div>
+    <span class="faint mono" style="font-size:.68rem;letter-spacing:.1em">检查一条仿写复用了几个词块</span>
+    <textarea id="compose" rows="3" style="margin-top:.35rem" placeholder="写一条你自己的推文，用上今天的骨架和词块"></textarea>
+    <div class="row" style="margin-top:.5rem">
+      <button class="act" id="btn-compose">检查并存档</button>
+      <label class="faint" style="font-size:.85rem"><input type="checkbox" id="posted" style="width:auto"> 已经发出去了</label>
+    </div>
+    <div id="compose-out" style="margin-top:.6rem"></div>
+  </div>
+  <div id="corpus-out" style="display:flex;flex-direction:column;gap:1rem"></div>
+</section>
+
+<!-- ─────────── 报告 ─────────── -->
+<section class="panel" id="p-report">
+  <h2>学习报告</h2>
+  <p>每个人的错误只有 3–5 个固定模式，但你自己看不见。修掉这几个，比背 500 个新词有用。</p>
+  <div id="report-out" style="display:flex;flex-direction:column;gap:1.3rem"></div>
+</section>
+</div>
+
+<script type="module">
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => [...document.querySelectorAll(s)];
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+async function call(url, body) {
+  const res = await fetch(url, body === undefined ? {} : {
+    method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error ?? '请求失败');
+  return data;
+}
+function showErr(el, e) { el.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+async function copy(text, btn) {
+  try { await navigator.clipboard.writeText(text); }
+  catch { const t = document.createElement('textarea'); t.value = text; document.body.appendChild(t);
+          t.select(); document.execCommand('copy'); t.remove(); }
+  const old = btn.textContent; btn.textContent = '已复制 ✓';
+  setTimeout(() => { btn.textContent = old; }, 1400);
+}
+
+let AUTO = false;
+const VERDICT = { wrong: '错', unnatural: '可以，但母语者不会这么说', equal: '一样好' };
+const CATEGORY = { chunk: '词块', structure: '结构', tone: '语气', leak: '硬伤' };
+const LEAK = { article:'冠词', tense:'时态', number:'单复数', preposition:'介词', agreement:'主谓一致', wordform:'词形' };
+
+// ── tabs ──
+$$('nav button').forEach((b) => b.onclick = () => {
+  $$('nav button').forEach((x) => x.classList.toggle('sel', x === b));
+  $$('.panel').forEach((p) => p.classList.toggle('sel', p.id === 'p-' + b.dataset.tab));
+  if (b.dataset.tab === 'practice') loadCards();
+  if (b.dataset.tab === 'corpus') loadCorpus();
+  if (b.dataset.tab === 'report') loadReport();
+});
+
+// ── 投料 ──
+let SELECTED = [];
+$('#btn-ingest').onclick = async () => {
+  const out = $('#ingest-out');
+  try {
+    const { tweets } = await call('/api/ingest', { text: $('#raw').value });
+    SELECTED = tweets.filter((t) => t.difficulty.usable).map((t) => t.text);
+    out.innerHTML = tweets.map((t) => {
+      const d = t.difficulty;
+      const mk = d.usable ? '<span class="qing">✓</span>' : '<span class="zhu">✗</span>';
+      return `<div class="item" style="cursor:default">
+        <span class="mk">${mk}</span>
+        <span><span class="mono">${esc(t.text)}</span><br>
+        <span class="faint" style="font-size:.82rem">${esc(d.reason)}</span></span></div>`;
+    }).join('');
+    const n = SELECTED.length;
+    $('#ingest-hint').textContent = `${n}/${tweets.length} 条通过`;
+    $('#card-flow').classList.toggle('hidden', n === 0);
+    $('#card-count').textContent = `${n} 条通过筛选，将为它们生成中文 gloss、句型骨架和词块。`;
+    $('#btn-card-auto').disabled = !AUTO;
+    $('#btn-card-auto').title = AUTO ? '' : '未检测到 API key';
+  } catch (e) { showErr(out, e); }
+};
+
+$('#btn-card-auto').onclick = async () => {
+  const msg = $('#card-msg'); msg.innerHTML = '<p>生成中…</p>';
+  try {
+    const { cards } = await call('/api/cards/auto', { texts: SELECTED });
+    msg.innerHTML = `<div class="ok">已生成 ${cards.length} 张卡片，去「练习」开始。</div>`;
+  } catch (e) { showErr(msg, e); }
+};
+$('#btn-card-manual').onclick = async () => {
+  const msg = $('#card-msg');
+  try {
+    const r = await call('/api/cards/request', { texts: SELECTED });
+    $('#card-payload').textContent = r.payload;
+    $('#card-manual').classList.remove('hidden');
+    msg.innerHTML = '';
+  } catch (e) { showErr(msg, e); }
+};
+$('#btn-copy-card').onclick = (e) => copy($('#card-payload').textContent, e.target);
+$('#btn-import-card').onclick = async () => {
+  const msg = $('#card-msg');
+  try {
+    const { cards } = await call('/api/cards/import', { texts: SELECTED, json: $('#card-json').value });
+    msg.innerHTML = `<div class="ok">已导入 ${cards.length} 张卡片，去「练习」开始。</div>`;
+    $('#card-manual').classList.add('hidden');
+  } catch (e) { showErr(msg, e); }
+};
+
+// ── 练习 ──
+let CARD = null, PENDING = null;
+async function loadCards() {
+  const el = $('#card-list');
+  try {
+    const { cards } = await call('/api/cards');
+    if (!cards.length) {
+      el.innerHTML = '<p>还没有卡片。先去「投料」粘几条推文。</p>'; return;
+    }
+    el.innerHTML = cards.map((c) => {
+      const done = c.attempts > 0
+        ? `<span class="qing">${Math.round(c.bestPct ?? 0)}%</span>`
+        : '<span class="faint">未练</span>';
+      return `<button class="item" data-id="${esc(c.id)}">
+        <span class="mk">L${c.level}</span>
+        <span>${esc(c.glossZh)}<br><span class="faint" style="font-size:.8rem">${done}${c.attempts ? ` · 练过 ${c.attempts} 次` : ''}</span></span>
+      </button>`;
+    }).join('');
+    el.querySelectorAll('.item').forEach((b) => b.onclick = () => openCard(b.dataset.id));
+  } catch (e) { showErr(el, e); }
+}
+async function openCard(id) {
+  CARD = await call(`/api/cards/${id}/practice`);
+  $('#drill-gloss').textContent = CARD.glossZh;
+  $('#drill-level').textContent = 'L' + CARD.level;
+  $('#attempt').value = '';
+  $('#result').innerHTML = '';
+  $('#grade-manual').classList.add('hidden');
+  $('#grade-json').value = '';
+  $('#submit-hint').textContent = AUTO ? '' : '手工批改模式';
+  $('#pick').classList.add('hidden');
+  $('#drill').classList.remove('hidden');
+  $('#attempt').focus();
+}
+$('#btn-back').onclick = () => {
+  $('#drill').classList.add('hidden'); $('#pick').classList.remove('hidden'); loadCards();
+};
+
+$('#btn-submit').onclick = async () => {
+  const res = $('#result'); const attempt = $('#attempt').value.trim();
+  if (!attempt) { res.innerHTML = '<div class="err">先写点什么再提交。</div>'; return; }
+  try {
+    if (AUTO) {
+      res.innerHTML = '<p>批改中…</p>';
+      renderReview(await call(`/api/cards/${CARD.id}/review`, { attempt }));
+    } else {
+      const r = await call(`/api/cards/${CARD.id}/grade-request`, { attempt });
+      PENDING = { cardId: r.cardId, attempt: r.attempt };
+      $('#grade-payload').textContent = r.payload;
+      $('#grade-manual').classList.remove('hidden');
+      res.innerHTML = '';
+      $('#grade-payload').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  } catch (e) { showErr(res, e); }
+};
+$('#btn-copy-grade').onclick = (e) => copy($('#grade-payload').textContent, e.target);
+$('#btn-import-grade').onclick = async () => {
+  const res = $('#result');
+  try {
+    renderReview(await call('/api/reviews/import', { ...PENDING, json: $('#grade-json').value }));
+    $('#grade-manual').classList.add('hidden');
+  } catch (e) { showErr(res, e); }
+};
+
+function renderReview(d) {
+  const r = d.review;
+  const pct = r.overlap.total > 0 ? Math.round(r.overlap.matched / r.overlap.total * 100) : 0;
+  const leaks = {};
+  r.items.forEach((i) => { if (i.leak) leaks[i.leak] = (leaks[i.leak] ?? 0) + 1; });
+
+  let h = `<div style="display:flex;flex-direction:column;gap:1.1rem;margin-top:.5rem">`;
+  h += `<div class="card">
+    <div class="split"><span class="t">你写的</span><span class="mono zhu">${esc($('#attempt').value.trim())}</span></div>
+    <div class="split"><span class="t">原文</span><span class="mono qing">${esc(d.original)}</span></div>
+  </div>`;
+  h += `<div><div class="row" style="justify-content:space-between">
+      <span class="faint mono" style="font-size:.7rem;letter-spacing:.1em">回译重合度</span>
+      <span class="mono"><b>${pct}%</b> <span class="faint">${r.overlap.matched}/${r.overlap.total} 意义单元</span></span>
+    </div><div class="bar" style="margin-top:.35rem"><i style="width:${pct}%"></i></div></div>`;
+  if (Object.keys(leaks).length) {
+    h += `<div class="mono" style="font-size:.82rem"><span class="faint">硬伤　</span>` +
+      Object.entries(leaks).sort((a,b)=>b[1]-a[1]).map(([k,v]) => `<span class="zhu">${LEAK[k]??k} ×${v}</span>`).join('　') + `</div>`;
+  }
+  if (r.items.length) {
+    h += '<div>';
+    r.items.forEach((it) => {
+      h += `<div class="diff ${esc(it.verdict)}">
+        <div class="hd"><span class="tag">${CATEGORY[it.category] ?? it.category}${it.leak ? ' · ' + (LEAK[it.leak] ?? it.leak) : ''}</span>
+          <span class="mono" style="font-size:.76rem">${VERDICT[it.verdict] ?? it.verdict}</span></div>
+        <div class="split"><span class="t">你</span><span class="mono zhu">${esc(it.mine)}</span></div>
+        <div class="split"><span class="t">原</span><span class="mono qing">${esc(it.native)}</span></div>
+        <div class="ex">${esc(it.explainZh)}</div>
+        ${it.rule ? `<div class="rule">规则 · ${esc(it.rule)}</div>` : ''}
+      </div>`;
+    });
+    h += '</div>';
+  }
+  if (r.strengths?.length) {
+    h += `<div class="ok"><strong>做对的地方</strong><br>` +
+      r.strengths.map((s) => '· ' + esc(s)).join('<br>') + `</div>`;
+  }
+  if (r.verdictZh) h += `<p style="color:var(--ink)"><strong>总评</strong>　${esc(r.verdictZh)}</p>`;
+
+  if (d.frames?.length) {
+    h += `<div class="card"><span class="faint mono" style="font-size:.68rem;letter-spacing:.1em">句型骨架 · 当天就用它说 3 件你自己的事</span>` +
+      d.frames.map((f) => `<div><span class="mono" style="color:#8A6D1F">${esc(f.pattern)}</span>
+        <span class="faint" style="font-size:.82rem"> [${esc(f.fn)}] ${esc(f.gloss_zh)}</span></div>`).join('') + `</div>`;
+  }
+  if (d.chunks?.length) {
+    h += `<div class="card"><span class="faint mono" style="font-size:.68rem;letter-spacing:.1em">词块 · 已入库</span>` +
+      d.chunks.map((c) => `<div><span class="mono qing">${esc(c.text)}</span>
+        <span class="faint" style="font-size:.82rem"> [${esc(c.fn)}] ${esc(c.gloss_zh)}</span></div>`).join('') + `</div>`;
+  }
+  h += '</div>';
+  $('#result').innerHTML = h;
+}
+
+window.__render = renderReview;
+
+// ── 语料库 ──
+let FN = '';
+async function loadCorpus() {
+  const out = $('#corpus-out');
+  try {
+    const d = await call('/api/corpus' + (FN ? '?fn=' + encodeURIComponent(FN) : ''));
+    if (!$('#fn-filter').dataset.built) {
+      $('#fn-filter').dataset.built = '1';
+      $('#fn-filter').innerHTML = `<button class="act ghost" data-fn="">全部</button>` +
+        d.functions.map((f) => `<button class="act ghost" data-fn="${esc(f)}">${esc(f)}</button>`).join('');
+      $('#fn-filter').querySelectorAll('button').forEach((b) => b.onclick = () => { FN = b.dataset.fn; loadCorpus(); });
+    }
+    $('#fn-filter').querySelectorAll('button').forEach((b) =>
+      b.style.borderColor = b.dataset.fn === FN ? 'var(--qing)' : 'var(--rule)');
+
+    let h = '';
+    if (d.frames.length) {
+      h += `<div><h2>句型骨架 <span class="faint mono" style="font-size:.8rem">${d.frames.length}</span></h2>` +
+        d.frames.map((f) => `<div class="card" style="margin-top:.5rem">
+          <span class="mono" style="color:#8A6D1F">${esc(f.pattern)}</span>
+          <span class="faint" style="font-size:.84rem">[${esc(f.fn)}] ${esc(f.gloss_zh)}</span></div>`).join('') + '</div>';
+    }
+    if (d.chunks.length) {
+      h += `<div><h2>词块 <span class="faint mono" style="font-size:.8rem">${d.chunks.length}</span></h2>` +
+        d.chunks.map((c) => `<div class="card" style="margin-top:.5rem">
+          <div><span class="mono qing">${esc(c.text)}</span> <span class="tag">${esc(c.fn)}</span></div>
+          <span class="faint" style="font-size:.84rem">${esc(c.gloss_zh)}</span>
+          <span class="mono faint" style="font-size:.78rem">${esc(c.example)}</span></div>`).join('') + '</div>';
+    }
+    out.innerHTML = h || '<p>还没有词块。做完一次批改就会自动入库。</p>';
+  } catch (e) { showErr(out, e); }
+}
+$('#btn-compose').onclick = async () => {
+  const out = $('#compose-out');
+  try {
+    const r = await call('/api/compose', { text: $('#compose').value, posted: $('#posted').checked });
+    out.innerHTML = r.ok
+      ? `<div class="ok">复用了 ${r.hits.length} 个词块 ✓<br>` +
+        r.hits.map((h) => `<span class="mono qing">${esc(h.text)}</span>`).join('　') + '</div>'
+      : `<div class="err">只复用了 ${r.hits.length} 个词块，还差 ${r.need} 个。<br>` +
+        `<span class="faint">铁律：每条自己写的推文至少用 2 个。不复用的语料库是坟场。</span></div>`;
+  } catch (e) { showErr(out, e); }
+};
+
+// ── 报告 ──
+async function loadReport() {
+  const out = $('#report-out');
+  try {
+    const p = await call('/api/progress');
+    if (!p.attempts) { out.innerHTML = '<p>还没有数据。先做几次回译。</p>'; return; }
+    let h = `<div class="stat">
+      <span><b>${p.attempts}</b> <span class="faint">次回译</span></span>
+      <span><b>${p.compositions}</b> <span class="faint">条仿写</span></span></div>`;
+
+    if (p.overlapTrend.length) {
+      const v = p.overlapTrend.map((t) => t.pct);
+      const last = v[v.length - 1], first = v[0];
+      h += `<div><div class="row" style="justify-content:space-between">
+        <span class="faint mono" style="font-size:.7rem;letter-spacing:.1em">回译重合度</span>
+        <span class="mono">${v.length > 1 ? `${first}% → ` : ''}<b>${last}%</b></span></div>` +
+        // 一个数据点画不出趋势，一根占满宽度的柱子什么也没说明
+        (v.length > 1
+          ? `<div style="display:flex;align-items:flex-end;gap:2px;height:44px;margin-top:.5rem">` +
+            v.map((x) => `<div style="flex:1;height:${Math.max(6, x)}%;background:var(--qing);opacity:.75;border-radius:1px" title="${x}%"></div>`).join('') +
+            `</div>`
+          : '') +
+        `<p style="margin-top:.4rem">阶段目标：从 ~40% 涨到 ~70%${v.length > 1 ? '' : '　·　再练几次才看得出趋势'}</p></div>`;
+    }
+
+    if (p.leaks.length) {
+      h += `<div><h2>你的错误模式</h2>` + p.leaks.slice(0, 5).map((l, i) => `
+        <div style="margin-top:.8rem">
+          <div class="row" style="justify-content:space-between">
+            <span><strong>${i + 1}. ${LEAK[l.leak] ?? l.leak}</strong> <span class="faint">${l.count} 次</span></span>
+            <span class="mono zhu">${Math.round(l.share * 100)}%</span></div>
+          <div class="bar" style="margin:.3rem 0 .4rem"><i style="width:${Math.round(l.share*100)}%;background:var(--zhu)"></i></div>
+          ${l.samples.slice(0,3).map((s) => `<div class="mono" style="font-size:.8rem">
+            <span class="zhu">${esc(s.mine)}</span> <span class="faint">→</span> <span class="qing">${esc(s.native)}</span></div>`).join('')}
+        </div>`).join('') + '</div>';
+    }
+
+    if (p.verdicts.length) {
+      const eq = p.verdicts.find((v) => v.verdict === 'equal')?.count ?? 0;
+      const tot = p.verdicts.reduce((s, v) => s + v.count, 0);
+      h += `<div><h2>判定分布</h2><p style="margin-top:.3rem">` +
+        p.verdicts.map((v) => `${VERDICT[v.verdict] ?? v.verdict} ${v.count}`).join('　·　') + '</p>' +
+        (tot > 12 && eq === 0 ? `<div class="err" style="margin-top:.5rem">一条 equal 都没有 —— 批改器可能在把「不同」误判成「错」。</div>` : '') + '</div>';
+    }
+
+    if (p.compositions) {
+      const pc = Math.round(p.reuseRate * 100);
+      h += `<div><h2>词块复用率</h2><p style="margin-top:.3rem"><span class="mono"><b>${pc}%</b></span> 的仿写用上了 ≥2 个库里的词块</p></div>`;
+    }
+
+    if (p.topRules.length) {
+      h += `<div><h2>反复踩的规则</h2>` + p.topRules.map((r) =>
+        `<p style="margin-top:.35rem;color:var(--ink)"><span class="mono zhu">×${r.count}</span>　${esc(r.rule)}</p>`).join('') + '</div>';
+    }
+    out.innerHTML = h;
+  } catch (e) { showErr(out, e); }
+}
+
+// ── init ──
+call('/api/health').then((h) => {
+  AUTO = h.hasKey;
+  const b = $('#mode');
+  b.textContent = h.hasKey ? '自动批改' : '手工批改模式';
+  b.classList.toggle('on', h.hasKey);
+  $('#btn-card-auto').disabled = !h.hasKey;
+});
+</script>
+</body>
+</html>

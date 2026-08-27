@@ -180,7 +180,13 @@ export interface Progress {
  * 只有累积统计才能把它们显出来。
  */
 export function progress(db: DatabaseSync): Progress {
-  const attempts = (db.prepare('SELECT COUNT(*) AS n FROM attempts').get() as { n: number }).n;
+  // 只统计已批改的回译。没有批改结果的 attempt 不算完成一次练习，
+  // 计入的话「回译次数」和重合度趋势都会虚高。
+  const attempts = (
+    db
+      .prepare('SELECT COUNT(*) AS n FROM attempts a JOIN reviews r ON r.attempt_id = a.id')
+      .get() as { n: number }
+  ).n;
 
   const overlapTrend = (
     db

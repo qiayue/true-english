@@ -10,45 +10,53 @@
 唯一有效的用法是：先制造出「我想说这句话」的处境，自己写一遍，
 再拿母语者的原句对答案 —— **你写的和他写的之间那个 diff，就是全部的课程内容。**
 
-## 用法
+## 跑起来
 
 ```bash
 npm install
-export ANTHROPIC_API_KEY=sk-ant-...
-
-# 难度筛选（90% 法则，不调 API）
-npm run score -- "I'll take a boring codebase over a clever one any day."
-npm run score -- --file data/seed/tweets.json
-
-# 生成每日卡片：中文 gloss + 句型骨架 + 词块
-npm run card -- --file data/seed/tweets.json --index 0
-
-# 批改一次回译 —— 核心动作
-npm run diff -- \
-  --original "Most of my slow days aren't slow because the code is hard." \
-  --attempt  "My slow day is not because code is difficult."
-
-# 跑评测集（改 prompt 前后各跑一次，对比通过率）
-npm run eval
+npm run dev          # → http://localhost:5173
 ```
 
-不需要 API key 的部分：
+零新增依赖：内置 `node:sqlite` 存数据，`node:http` 起服务，前端是一个单文件页面。
+
+想先看看整条链路长什么样，不用自己练：
 
 ```bash
-# 灌入模拟数据，看整条链路长什么样
-npm run demo -- --db data/demo.db
+npm run seed:example    # 灌入 2 张卡片 + 1 次完整批改
+```
 
-# 学习报告：个人错误模式分析
-npm run report -- --db data/demo.db
+## 用法
 
-# 语料库：按功能检索，不按话题
-npm run corpus -- --db data/demo.db --fn 反对
+1. **投料** —— 粘贴推文（一条一段，空行分隔）。立刻过 90% 法则筛选，不调 API。
+2. **做成卡片** —— 生成中文 gloss、句型骨架、词块。
+3. **练习** —— 只给你看中文，凭中文翻回英文。
+   英文原文在服务端，提交前不下发到浏览器 —— **偷看的成本不是零，这是故意的**。
+4. **批改** —— 逐处 diff，分成词块 / 结构 / 语气 / 硬伤，
+   每处三分判定：错 / 可以但母语者不会这么说 / 一样好。
+5. **语料库** —— 词块和骨架按**功能**自动入库（赞同、反对、让步、限定…），不按话题。
+6. **报告** —— 个人错误模式排行 + 「反复踩的规则」，从你自己的批改结果里长出来。
 
-# 检查一条仿写复用了哪些词块（铁律：至少 2 个）
-npm run corpus -- --db data/demo.db --check "I'd push back on that a little."
+## 两种批改模式
+
+| | 何时用 | 怎么用 |
+|---|---|---|
+| **自动** | 设了 `ANTHROPIC_API_KEY` | 直接提交，等结果 |
+| **手工** | 没有 key | 页面导出一份完整请求 → 贴给任意 Claude 会话 → 把返回的 JSON 贴回来 |
+
+手工模式不是临时补丁，是正式路径。它同时也是 prompt 的调试通道 ——
+你能看到引擎实际被喂了什么。串卡片粘贴会被拦下（批改里引用的英文对不上本卡原文时报错）。
+
+## 命令行
+
+```bash
+npm run score  -- --file data/seed/tweets.json   # 90% 法则筛选，不调 API
+npm run demo   -- --db data/demo.db              # 灌模拟数据
+npm run report -- --db data/demo.db              # 学习报告
+npm run corpus -- --db data/demo.db --fn 反对     # 按功能检索语料库
+npm run eval                                     # 批改引擎评测集（需要 key）
 ```
 
 ## 文档
 
-- [方法论](docs/method.md) — 为什么这么学，以及完整的日/周循环、三阶段路线
-- [项目规划](docs/plan.md) — 里程碑、目录结构、设计结论
+- [方法论](docs/method.md) — 为什么这么学，日/周循环、三阶段路线
+- [项目规划](docs/plan.md) — 里程碑、设计结论、还缺什么

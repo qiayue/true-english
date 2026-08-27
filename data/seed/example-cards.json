@@ -1,0 +1,40 @@
+[
+  {
+    "glossZh": "我以前以为，做东西快靠的是手速。其实不是。靠的是需要拿的主意更少。",
+    "frames": [
+      { "pattern": "I used to think X. It's not. It's about Y.", "fn": "观点转变",
+        "glossZh": "先亮出旧看法，一句话否掉，再给新看法 —— 观点转变类推文最常用的三段式开头" },
+      { "pattern": "It's not about X. It's about Y.", "fn": "强调",
+        "glossZh": "纠正别人的关注点：不是你以为的那个，是这个" }
+    ],
+    "chunks": [
+      { "text": "used to think", "fn": "观点转变",
+        "glossZh": "以前一直以为，且暗含「我现在改主意了」",
+        "example": "I used to think shipping fast was about typing fast." },
+      { "text": "be about X", "fn": "强调",
+        "glossZh": "关键在于 X。中文的「是」表示「关键在于」时不能直译成 is",
+        "example": "shipping fast was about typing fast" },
+      { "text": "It's not.", "fn": "反对",
+        "glossZh": "独立成句的强否定，两个词一顿。这是推特体的节奏，中文母语者几乎不会自己写出来",
+        "example": "I used to think shipping fast was about typing fast. It's not." }
+    ]
+  },
+  {
+    "glossZh": "我那些最好的决定，当时看着都挺没意思的。",
+    "frames": [
+      { "pattern": "Most of my X ___.", "fn": "限定",
+        "glossZh": "用 most of 起头做限定，把论断收窄，避免说死" }
+    ],
+    "chunks": [
+      { "text": "most of my", "fn": "限定",
+        "glossZh": "我的大部分。中文不标复数也不常限定，英文靠这个把话说得不绝对",
+        "example": "Most of my best decisions looked boring at the time." },
+      { "text": "looked X", "fn": "叙事",
+        "glossZh": "看上去是 X（但实际未必）。中文母语者会直接写 were，丢掉「看上去」这层",
+        "example": "my best decisions looked boring" },
+      { "text": "at the time", "fn": "叙事",
+        "glossZh": "当时。放句尾，回指过去某个时点",
+        "example": "looked boring at the time" }
+    ]
+  }
+]

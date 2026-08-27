@@ -1,0 +1,82 @@
+{
+  "items": [
+    {
+      "mine": "Before I think",
+      "native": "I used to think",
+      "category": "chunk",
+      "verdict": "wrong",
+      "leak": null,
+      "explainZh": "used to think 表示「过去一直这么认为」，而且暗含「现在我改主意了」—— 整条推的骨架就架在这层意思上。你写的 Before I think 在英文里读作「在我思考之前」，意思跑偏了。",
+      "rule": "讲「我以前一直以为（现在不这么认为了）」固定用 used to think，不用 before"
+    },
+    {
+      "mine": "do thing fast",
+      "native": "shipping fast",
+      "category": "structure",
+      "verdict": "wrong",
+      "leak": null,
+      "explainZh": "英文拿一个动作当主语必须用动名词：shipping fast。你写的 do 是动词原形，不能占主语位。中文「做东西快」这三个字本身没有形态，直译过来就散了。",
+      "rule": "动作充当主语时用 -ing 形式，不用动词原形"
+    },
+    {
+      "mine": "is typing fast",
+      "native": "was about typing fast",
+      "category": "chunk",
+      "verdict": "wrong",
+      "leak": null,
+      "explainZh": "中文的「靠的是」「关键在于」，英文是 be about X，不能直译成 is。这是这条推最值钱的一个词块，也是中文母语者最想不到的一个。",
+      "rule": "中文「关键在于 X / 靠的是 X」用 be about X，不用 is"
+    },
+    {
+      "mine": "is",
+      "native": "was",
+      "category": "leak",
+      "verdict": "wrong",
+      "leak": "tense",
+      "explainZh": "这半句在讲你「以前」的认知，前面已经用了过去时，从句也要跟着退到过去：was。中文靠「以前」两个字标时间，英文靠动词形态标，两处都得标。",
+      "rule": "主句用了过去时，从句动词要跟着变过去时"
+    },
+    {
+      "mine": "No.",
+      "native": "It's not.",
+      "category": "tone",
+      "verdict": "unnatural",
+      "leak": null,
+      "explainZh": "语法上没错，但光一个 No. 像在回答别人的问题，不像在否定自己刚说的话。英文用 It's not. —— 补上主语和系动词，两个词一顿，这是推特体的节奏。",
+      "rule": "单独否定自己前一句时用 It's not.，不用光秃秃的 No."
+    },
+    {
+      "mine": "Is you need",
+      "native": "It's about having",
+      "category": "structure",
+      "verdict": "wrong",
+      "leak": null,
+      "explainZh": "中文可以直接说「靠的是…」不带主语，英文不行，必须补出形式主语 It。这是意合和形合的差别：中文靠语义连着，英文靠形式撑着。",
+      "rule": "中文省略主语的句子翻成英文，必须补出形式主语 It"
+    },
+    {
+      "mine": "need make",
+      "native": "having ... to decide",
+      "category": "leak",
+      "verdict": "wrong",
+      "leak": "wordform",
+      "explainZh": "need 后面接不定式 to make，不能直接跟动词原形。中文「需要拿主意」两个动词可以直接连，英文一句只能有一个主要动词，其余要么变不定式要么变动名词。",
+      "rule": "英文一句只有一个主要动词，其余动作降级成 to do 或 doing"
+    },
+    {
+      "mine": "less decision",
+      "native": "fewer things",
+      "category": "leak",
+      "verdict": "wrong",
+      "leak": "number",
+      "explainZh": "decision 可数，可数名词用 fewer 不用 less，而且必须变复数 decisions。中文不标复数，所以这个坑会反复踩，要靠统计盯住。",
+      "rule": "可数名词用 fewer + 复数形式，不可数名词才用 less"
+    }
+  ],
+  "overlap": { "matched": 2, "total": 9 },
+  "strengths": [
+    "三段式骨架你完整搭出来了：旧看法 → 一句话否掉 → 新看法。这是这条推最难的部分，也是最值得带走的部分，你抓住了。",
+    "typing fast 原样保留，没有改写成别的说法 —— 说明你读懂了它是个整体。"
+  ],
+  "verdictZh": "骨架对了，但每一段的英文都是从中文直译过来的：省主语、动词原形当主语、is 直译中文的「是」。这三处看起来是三个错，其实是同一个病根 —— 中文靠语义连，英文靠形式撑。下次落笔前先问一句「谁在做这个动作」。"
+}

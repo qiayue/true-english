@@ -12,7 +12,10 @@
     "typecheck": "tsc --noEmit",
     "report": "tsx src/cli/report.ts",
     "corpus": "tsx src/cli/corpus.ts",
-    "demo": "tsx src/cli/demo.ts"
+    "demo": "tsx src/cli/demo.ts",
+    "dev": "tsx src/server/index.ts",
+    "seed:example": "bash scripts/seed-example.sh",
+    "shot": "node scripts/screenshot.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.121.0",
@@ -20,6 +23,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "playwright": "^1.62.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   }
