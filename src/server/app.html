@@ -108,6 +108,15 @@ pre.payload{background:var(--surface);border:1px solid var(--rule);border-radius
 .hit{border-left:3px solid var(--qing);background:var(--qing-wash);padding:.6rem .85rem;
   display:flex;flex-direction:column;gap:.3rem}
 .seam{height:1px;background:var(--rule)}
+.clozebox{font-family:var(--mono);font-size:.95rem;line-height:2.4;
+  background:var(--surface);border:1px solid var(--rule);border-radius:3px;padding:.9rem 1rem}
+.clozebox input{display:inline-block;width:auto;min-width:3.5rem;padding:.1rem .4rem;
+  font-family:var(--mono);font-size:.9rem;text-align:center;
+  border:none;border-bottom:2px solid var(--zhu);border-radius:0;background:transparent}
+.clozebox input:focus{outline:none;border-bottom-color:var(--qing);background:var(--qing-wash)}
+.clozebox input.ok{border-bottom-color:var(--qing);color:var(--qing)}
+.clozebox input.bad{border-bottom-color:var(--zhu);color:var(--zhu)}
+.leaktag{font-size:.6rem;color:var(--faint);vertical-align:super;margin-left:.1rem}
 .linkish{background:none;border:none;padding:0;font:inherit;color:var(--ink);
   cursor:pointer;text-align:left;line-height:1.6}
 .linkish:hover{color:var(--qing)}
@@ -207,7 +216,8 @@ pre.payload{background:var(--surface);border:1px solid var(--rule);border-radius
     <div class="row">
       <button class="act ghost" id="btn-back">← 换一张</button>
       <span class="tag" id="drill-level"></span>
-      <button class="link" id="btn-mode-toggle" style="margin-left:auto">⋯</button>
+      <span class="tag" id="stage-tag"></span>
+      <button class="link" id="btn-mode-toggle" style="margin-left:auto">换一级 ⋯</button>
       <span id="mode-switch" class="row hidden" style="gap:.35rem"></span>
     </div>
 
@@ -229,6 +239,21 @@ pre.payload{background:var(--surface);border:1px solid var(--rule);border-radius
         <button class="link hidden" id="btn-step-peek">再看一眼</button>
         <button class="link hidden" id="btn-step-copy">看着原文抄一遍</button>
       </div>
+    </div>
+
+    <!-- 填空级 -->
+    <div id="cloze" class="hidden" style="display:flex;flex-direction:column;gap:.9rem">
+      <div id="cloze-dots" class="row" style="gap:.3rem"></div>
+      <div class="card">
+        <span class="faint mono" style="font-size:.68rem;letter-spacing:.1em" id="cloze-label"></span>
+        <div class="gloss" id="cloze-gloss"></div>
+      </div>
+      <div class="cue" id="cloze-cue"></div>
+      <div class="clozebox" id="cloze-body"></div>
+      <div class="row">
+        <button class="act" id="btn-cloze-check">对照</button>
+      </div>
+      <div id="cloze-out"></div>
     </div>
 
     <!-- 整段模式 -->
@@ -437,6 +462,7 @@ $('#btn-import-card').onclick = async () => {
 // ── 练习 ──
 let CARD = null, PENDING = null;
 let SHOW_ALL = false;
+const STAGE_ZH_MAP = { copy: '照抄', cloze: '填空', step: '逐句', whole: '整段' };
 
 /**
  * 练习页的落地内容：**今日队列**，不是一堆卡片。
@@ -470,30 +496,34 @@ async function loadCards() {
       $('#pick-title').textContent = '今天';
       $('#btn-show-all').textContent = '看全部卡片';
       if (t.items.length) {
+        // 说清楚系统替他做了什么取舍 —— 只给个列表，他不知道背后有没有积压
         $('#pick-sub').innerHTML =
-          `<span class="zhu">复习 ${t.review} 张</span>　<span class="faint">新卡 ${t.fresh} 张</span>　` +
-          `<span class="faint">复习排在前面 —— 重合度只能靠重复同一批材料涨上去。</span>`;
+          `<span class="mono"><b>${t.minutes}</b> 分钟</span>` +
+          `<span class="faint"> / 预算 ${t.budget}　·　</span>` +
+          `<span class="zhu">复习 ${t.review}</span><span class="faint"> · 新卡 ${t.fresh}</span>` +
+          (t.backlog ? `　<span class="faint">还有 ${t.backlog} 条排不下，明天继续</span>` : '') +
+          (t.weak?.length ? `<br><span class="faint" style="font-size:.8rem">优先排了能练到你「${
+            LEAK_TIP[t.weak[0]] ?? t.weak[0]}」漏点的卡</span>` : '');
+        el.innerHTML = t.items.map((i) => {
+          const tag = i.kind === 'review' ? '<span class="mk zhu">复习</span>' : '<span class="mk qing">新</span>';
+          return `<button class="item" data-id="${esc(i.cardId)}">${tag}
+            <span>${esc(i.glossZh)}<br>
+              <span class="faint" style="font-size:.8rem">
+                <span class="tag">${esc(STAGE_ZH_MAP[i.stage] ?? i.stage)}</span>
+                ${i.estMinutes} 分钟　${esc(i.why)}</span></span></button>`;
+        }).join('');
       } else if (t.cleared) {
-        // 练完了是成就，不是空状态。把它和「还没有卡片」区分开。
         const hrs = t.nextDueAt
           ? Math.max(1, Math.round((new Date(t.nextDueAt) - Date.now()) / 3600000)) : null;
         $('#pick-sub').innerHTML =
           `<span class="qing"><strong>今天练完了。</strong></span>　` +
           (hrs ? `<span class="faint">下一批复习在 ${hrs} 小时后。</span>　` : '') +
           `<span class="faint">别加练 —— 每天一条吃透，比十条走马观花有用。</span>`;
+        el.innerHTML = '';
       } else {
         $('#pick-sub').textContent = '还没有卡片。先去「投料」粘几条推文。';
+        el.innerHTML = '';
       }
-      el.innerHTML = t.items.map((i) => {
-        const tag = i.kind === 'review'
-          ? `<span class="mk zhu">复习</span>`
-          : `<span class="mk qing">新</span>`;
-        const sub = i.kind === 'review'
-          ? `${i.dueSteps}/${i.totalSteps} 步到期${i.weakestBox === 0 ? ' · <span class="zhu">上次卡住了</span>' : ''}`
-          : `${i.totalSteps} 步，没练过`;
-        return `<button class="item" data-id="${esc(i.cardId)}">${tag}
-          <span>${esc(i.glossZh)}<br><span class="faint" style="font-size:.8rem">${sub}</span></span></button>`;
-      }).join('');
     }
     el.querySelectorAll('.item').forEach((b) => b.onclick = () => openCard(b.dataset.id));
   } catch (e) { showErr(el, e); }
@@ -533,10 +563,12 @@ function confirmDelete(id, btn) {
 
 let STEP = 0, HINT = 0, TRIES = 0, PHASE = 'write', COPY = false, LAST_DIFF = null;
 let USED_HINT = false;
+let STAGE = 'step';
+let CLOZE = null;
 let DONE_EN = [];   // 已完成步骤的原文，用作后续步骤的上文语境
 
-async function openCard(id) {
-  CARD = await call(`/api/cards/${id}/practice`);
+async function openCard(id, wantStage) {
+  CARD = await call(`/api/cards/${id}/practice` + (wantStage ? `?stage=${wantStage}` : ''));
   $('#drill-gloss').textContent = CARD.glossZh;
   $('#drill-level').textContent = 'L' + CARD.level;
   $('#attempt').value = '';
@@ -549,26 +581,33 @@ async function openCard(id) {
 
   DONE_EN = [];
   const hasSteps = (CARD.steps ?? []).length > 0;
+  $('#stage-tag').textContent = hasSteps ? `${CARD.stageZh}${CARD.stage === CARD.autoStage ? '' : ' · 手选'}` : '整段';
   $('#btn-mode-toggle').classList.toggle('hidden', !hasSteps);
   $('#mode-switch').innerHTML = hasSteps
-    ? `<button class="act ghost" data-mode="ladder">逐句练</button>
-       <button class="act ghost" data-mode="whole">直接写整段</button>`
+    ? CARD.stages.map((s) => `<button class="act ghost" data-stage="${s.key}">${s.zh}</button>`).join('')
     : '';
-  $('#mode-switch').querySelectorAll('button').forEach((b) =>
-    b.onclick = () => { setMode(b.dataset.mode); $('#mode-switch').classList.add('hidden'); });
-  setMode(hasSteps ? 'ladder' : 'whole');
+  $('#mode-switch').querySelectorAll('button').forEach((b) => {
+    b.style.borderColor = b.dataset.stage === CARD.stage ? 'var(--qing)' : 'var(--rule)';
+    b.onclick = async () => {
+      $('#mode-switch').classList.add('hidden');
+      await openCard(CARD.id, b.dataset.stage);
+    };
+  });
+  setMode(hasSteps ? CARD.stage : 'whole');
 }
 
 // 模式切换默认收起来 —— 练习时它不该一直杵在屏幕上抢注意力
 $('#btn-mode-toggle').onclick = () => $('#mode-switch').classList.toggle('hidden');
 
+/** mode 现在就是支架级别：copy / cloze / step / whole */
 function setMode(mode) {
-  $('#ladder').classList.toggle('hidden', mode !== 'ladder');
-  $('#whole').classList.toggle('hidden', mode === 'ladder');
-  $('#mode-switch').querySelectorAll('button').forEach((b) =>
-    b.style.borderColor = b.dataset.mode === mode ? 'var(--qing)' : 'var(--rule)');
-  if (mode === 'ladder') { STEP = 0; renderStep(); }
-  else $('#attempt').focus();
+  STAGE = mode;
+  $('#ladder').classList.toggle('hidden', !(mode === 'copy' || mode === 'step'));
+  $('#cloze').classList.toggle('hidden', mode !== 'cloze');
+  $('#whole').classList.toggle('hidden', mode !== 'whole');
+  if (mode === 'cloze') { STEP = 0; void renderCloze(); }
+  else if (mode === 'whole') $('#attempt').focus();
+  else { STEP = 0; renderStep(); }
 }
 
 /**
@@ -589,6 +628,10 @@ const PHASES = {
     cue: '看清楚差在哪。记住之后点下面 —— <b>原文会遮起来，你凭记忆写</b>。',
     primary: '遮住，我来写',
   },
+  copyStudy: {
+    cue: '看这一句，记住它。点下面之后<b>原文会遮起来，你凭记忆打一遍</b> —— 照着抄不算数。',
+    primary: '遮住，我来打',
+  },
   recall: { cue: '凭记忆写一遍。', primary: '再对照' },
   copy: {
     cue: '这一步卡住了。<b>照着原文抄一遍</b>，手过一遍比看十遍管用。',
@@ -599,7 +642,7 @@ const PHASES = {
 
 function setPhase(p) {
   PHASE = p;
-  const cfg = PHASES[p];
+  const cfg = PHASES[p === 'study' && STAGE === 'copy' && !LAST_DIFF ? 'copyStudy' : p];
   $('#step-cue').innerHTML = cfg.cue + (TRIES > 1 && p !== 'hit' ? ` <span class="tries">第 ${TRIES} 次</span>` : '');
   // 最后一步的「下一步」通往整段模式，得说清楚，否则不知道接下来要干嘛
   const last = CARD?.steps && STEP === CARD.steps.length - 1;
@@ -635,7 +678,24 @@ function renderStep() {
   $('#step-gloss').textContent = steps[STEP].glossZh;
   $('#step-input').value = '';
   $('#step-out').innerHTML = '';
-  setPhase('write');
+  if (STAGE === 'copy') void enterCopy();
+  else setPhase('write');
+}
+
+/**
+ * 照抄级从「看」进，不从「盲写」进 —— 这一级本来就是要给原文看的。
+ * 但看完必须遮住再打：抄写最大的风险是空转，眼睛在原文和输入框之间
+ * 来回弹、手在搬运、脑子没参与。中间那个记忆缺口才是有用的部分。
+ */
+async function enterCopy() {
+  try {
+    const d = await call(`/api/cards/${CARD.id}/steps/${STEP}/copy`);
+    LAST_DIFF = null;
+    $('#step-out').innerHTML = `<div class="card">
+      <span class="faint mono" style="font-size:.68rem;letter-spacing:.1em">原文 · ${d.words} 个词</span>
+      <div class="mono qing" style="font-size:1rem;line-height:1.9">${esc(d.en)}</div></div>`;
+    setPhase('study');
+  } catch (e) { showErr($('#step-out'), e); }
 }
 
 function renderDiff(d) {
@@ -922,6 +982,92 @@ function renderFinish(d) {
 }
 
 window.__render = renderReview;
+
+// ── 填空级 ──
+
+const LEAK_TIP = {
+  article: '冠词', tense: '时态', number: '单复数',
+  preposition: '介词', agreement: '主谓一致', wordform: '词形',
+};
+
+/**
+ * 填空级。挖空点来自服务端，按学习者的个人漏点选 ——
+ * 不是随机。随机挖掉 Cloudflare 只是在考拼写记忆。
+ * 空位上标着考的是哪一类，因为这一级的目的是让人**意识到**
+ * 自己总在同几个地方栽跟头。
+ */
+async function renderCloze() {
+  const steps = CARD.steps;
+  STEP = Math.min(STEP, steps.length - 1);
+  $('#cloze-dots').innerHTML = steps.map((_, i) =>
+    `<span class="dot ${i < STEP ? 'done' : i === STEP ? 'cur' : ''}"></span>`).join('');
+  $('#cloze-label').textContent = `第 ${STEP + 1} / ${steps.length} 步`;
+  $('#cloze-gloss').textContent = steps[STEP].glossZh;
+  $('#cloze-out').innerHTML = '';
+  $('#btn-cloze-check').textContent = '对照';
+  try {
+    CLOZE = await call(`/api/cards/${CARD.id}/steps/${STEP}/cloze`);
+    $('#cloze-cue').innerHTML = CARD.stageHint;
+    let bi = 0;
+    $('#cloze-body').innerHTML = CLOZE.tokens.map((tk, i) => {
+      if (tk !== null) return esc(tk);
+      const b = CLOZE.blanks.find((x) => x.index === i);
+      const j = bi++;
+      return `<span><input data-b="${j}" size="${Math.max(3, (b?.len ?? 4))}" autocomplete="off"
+        spellcheck="false">${b?.leak ? `<span class="leaktag">${LEAK_TIP[b.leak] ?? ''}</span>` : ''}</span>`;
+    }).join(' ');
+    const first = $('#cloze-body').querySelector('input');
+    if (first) first.focus();
+    // 最后一个空按 Enter 直接判定
+    $('#cloze-body').querySelectorAll('input').forEach((el, i, all) => {
+      el.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' || e.isComposing) return;
+        e.preventDefault();
+        if (i < all.length - 1) all[i + 1].focus();
+        else $('#btn-cloze-check').click();
+      });
+    });
+  } catch (e) { showErr($('#cloze-out'), e); }
+}
+
+$('#btn-cloze-check').onclick = async () => {
+  const out = $('#cloze-out');
+  if ($('#btn-cloze-check').textContent.includes('下一步') ||
+      $('#btn-cloze-check').textContent.includes('整条')) {
+    if (STEP < CARD.steps.length - 1) { STEP++; void renderCloze(); }
+    else { setMode('whole'); $('#result').innerHTML =
+      '<div class="ok" style="margin-top:.5rem">填空过完了。现在凭中文把<strong>整条</strong>写一遍 —— 这一次才是真正的批改。</div>'; }
+    return;
+  }
+  const inputs = [...$('#cloze-body').querySelectorAll('input')];
+  const answers = inputs.map((el) => el.value);
+  if (answers.every((a) => !a.trim())) { out.innerHTML = '<div class="err">先填一个试试。</div>'; return; }
+  try {
+    const r = await call(`/api/cards/${CARD.id}/steps/${STEP}/cloze`, { answers });
+    r.results.forEach((res, i) => {
+      inputs[i].classList.toggle('ok', res.ok);
+      inputs[i].classList.toggle('bad', !res.ok);
+      if (!res.ok) inputs[i].value = res.got || '';
+    });
+    const wrong = r.results.filter((x) => !x.ok);
+    if (r.allOk) {
+      out.innerHTML = `<div class="hit"><span class="qing"><strong>✓ 全对</strong></span>
+        <span class="mono qing">${esc(r.en)}</span></div>`;
+      $('#btn-cloze-check').textContent =
+        STEP < CARD.steps.length - 1 ? '下一步 →' : '连起来写整条 →';
+      void reportStep({ tries: 1, hinted: false, copied: false, accepted: false });
+    } else {
+      out.innerHTML = `<div class="card">
+        <span class="faint mono" style="font-size:.68rem;letter-spacing:.1em">错了 ${wrong.length} 个</span>
+        ${wrong.map((w) => `<div class="split"><span class="t">${LEAK_TIP[w.leak] ?? ''}</span>
+          <span><span class="mono zhu">${esc(w.got || '(空)')}</span>
+          <span class="faint"> → </span><span class="mono qing">${esc(w.answer)}</span></span></div>`).join('')}
+        <p style="font-size:.84rem">改完再对一次。这些空不是随机挖的 —— 挖的正是你批改记录里反复栽的那几类。</p>
+      </div>`;
+      inputs.find((el) => el.classList.contains('bad'))?.focus();
+    }
+  } catch (e) { showErr(out, e); }
+};
 
 // ── 语料库 ──
 let FN = '';

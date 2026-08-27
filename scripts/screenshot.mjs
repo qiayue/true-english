@@ -7,7 +7,7 @@
  *   node scripts/screenshot.mjs            截全部
  *   node scripts/screenshot.mjs today      只截某一个
  *
- * 场景：settings / today / write / retry / recall / review / finish
+ * 场景：settings / today / copy / cloze / write / retry / recall / review / finish
  * 输出到 /tmp/shots/
  */
 import { chromium } from 'playwright';
@@ -41,6 +41,16 @@ if ((await list.count()) === 0) {
   await b.close(); process.exit(0);
 }
 await list.first().click();
+// 新卡默认落在照抄级，那一级「看」的时候输入框是收起来的 ——
+// 等 #ladder 而不是等 #step-input，否则这里必然超时
+await p.locator('#ladder').waitFor({ state: 'visible', timeout: 10_000 });
+await p.waitForTimeout(500);
+await shot('copy');
+await p.click('#btn-mode-toggle').catch(()=>{}); await p.waitForTimeout(200);
+await p.click('#mode-switch button[data-stage="cloze"]').catch(()=>{}); await p.waitForTimeout(700);
+await shot('cloze');
+await p.click('#btn-mode-toggle').catch(()=>{}); await p.waitForTimeout(200);
+await p.click('#mode-switch button[data-stage="step"]').catch(()=>{}); await p.waitForTimeout(600);
 await p.locator('#step-input').waitFor({ state: 'visible', timeout: 10_000 });
 await shot('write');
 
@@ -57,7 +67,8 @@ await p.click('#btn-step-primary'); await p.waitForTimeout(250);
 await p.fill('#step-input', RIGHT);
 await p.keyboard.press('Enter'); await p.waitForTimeout(450);
 await p.click('#btn-mode-toggle'); await p.waitForTimeout(200);
-await p.click('#mode-switch button[data-mode="whole"]'); await p.waitForTimeout(300);
+await p.click('#mode-switch button[data-stage="whole"]'); await p.waitForTimeout(400);
+await p.locator('#attempt').waitFor({ state: 'visible', timeout: 10_000 });
 await p.fill('#attempt', 'We redesigned the Cloudfalre Blog, darm mode, cleaner UI, faster load times.');
 await p.click('#btn-submit'); await p.waitForTimeout(500);
 if (fs.existsSync('/tmp/rev2.json')) {

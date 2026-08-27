@@ -10,6 +10,8 @@ import {
 } from '../core/store.js';
 import { wordDiff, hint, type HintLevel } from '../core/steps.js';
 import { loadConfig, publicConfig, saveConfig, clearKey, type LlmConfig } from '../core/settings.js';
+import { planToday, stageForBox, weakLeaks, STAGE_ZH, STAGE_HINT, STAGES, type Stage } from '../core/plan.js';
+import { makeCloze, checkCloze } from '../core/cloze.js';
 import { ping } from '../core/llm.js';
 import { FUNCTIONS, type Fn } from '../core/taxonomy.js';
 import type { Card } from '../core/types.js';
@@ -135,14 +137,62 @@ export function listCards(db: DatabaseSync): CardListItem[] {
  * 如果英文躺在页面的 DOM 里，偷看的成本就是零，练习立刻退化成抄写。
  * 服务端不发，才是真的不发。
  */
-export function practiceCard(db: DatabaseSync, id: string) {
+export function practiceCard(db: DatabaseSync, id: string, want?: string) {
   const row = db
     .prepare('SELECT id, gloss_zh AS glossZh, level FROM cards WHERE id = ?')
     .get(id) as unknown as { id: string; glossZh: string; level: number } | undefined;
   if (!row) throw new ApiError('卡片不存在', 404);
-  // 阶梯同样只下发中文。en 留在服务端，对照时才逐步放出。
+
+  const minBox = (
+    db.prepare('SELECT MIN(box) AS b FROM step_progress WHERE card_id = ?').get(id) as { b: number | null }
+  ).b;
+  const practiced = (
+    db.prepare('SELECT COUNT(*) AS n FROM step_progress WHERE card_id = ?').get(id) as { n: number }
+  ).n;
+
+  // 自动选级，但允许手动覆盖 —— 想多练一遍照抄，或者今天状态好想直接写整段，
+  // 都是合理的。系统给默认值，不该把人锁死。
+  const auto = stageForBox(practiced === 0 ? null : minBox);
+  const stage: Stage = STAGES.includes(want as Stage) ? (want as Stage) : auto;
+
+  // 阶梯同样只下发中文。en 留在服务端，各级按需另外要。
   const steps = stepsOf(db, id).map((s) => ({ idx: s.idx, glossZh: s.glossZh }));
-  return { ...row, steps };
+  return {
+    ...row, steps, stage, autoStage: auto, box: practiced === 0 ? null : minBox,
+    stageZh: STAGE_ZH[stage], stageHint: STAGE_HINT[stage],
+    stages: STAGES.map((k) => ({ key: k, zh: STAGE_ZH[k] })),
+  };
+}
+
+/**
+ * 照抄级：这一级就是要给原文看的。
+ *
+ * 但给法有讲究 —— 界面上必须是「看一眼 → 遮住 → 打出来」，
+ * 不是把原文摆着让你照着敲。抄写最大的风险是空转：
+ * 眼睛在原文和输入框之间来回弹，手在搬运，脑子没参与。
+ * 中间那个记忆缺口才是这一级唯一有用的部分。
+ */
+export function copyTarget(db: DatabaseSync, cardId: string, idx: number) {
+  const st = stepAt(db, cardId, idx);
+  return { idx, en: st.en, words: st.en.trim().split(/\s+/).length };
+}
+
+/** 填空级：**只发挖空后的题面，不发答案** */
+export function clozeTarget(db: DatabaseSync, cardId: string, idx: number) {
+  const st = stepAt(db, cardId, idx);
+  const c = makeCloze(st.en, weakLeaks(db));
+  return {
+    idx,
+    tokens: c.tokens.map((tk, i) => (c.blanks.some((b) => b.index === i) ? null : tk)),
+    blanks: c.blanks.map((b) => ({ index: b.index, leak: b.leak, len: b.answer.replace(/[^A-Za-z']/g, '').length })),
+  };
+}
+
+export function clozeCheck(db: DatabaseSync, cardId: string, idx: number, answers: string[]) {
+  const st = stepAt(db, cardId, idx);
+  const c = makeCloze(st.en, weakLeaks(db));
+  const r = checkCloze(c, answers);
+  return { ...r, en: st.en };
 }
 
 function stepAt(db: DatabaseSync, cardId: string, idx: number) {
@@ -179,12 +229,19 @@ export function finishStep(db: DatabaseSync, cardId: string, idx: number, o: Par
   });
 }
 
-export function todayQueue(db: DatabaseSync) {
-  const v = todayView(db);
+export function todayQueue(db: DatabaseSync, budgetMinutes?: number) {
+  const p = planToday(db, budgetMinutes ? { budgetMinutes } : {});
+  const totalCards = (db.prepare('SELECT COUNT(*) AS n FROM cards').get() as { n: number }).n;
+  const next = db
+    .prepare('SELECT MIN(due_at) AS d FROM step_progress WHERE due_at > ?')
+    .get(new Date().toISOString()) as { d: string | null };
   return {
-    ...v,
-    review: v.items.filter((i) => i.kind === 'review').length,
-    fresh: v.items.filter((i) => i.kind === 'new').length,
+    ...p,
+    review: p.items.filter((i) => i.kind === 'review').length,
+    fresh: p.items.filter((i) => i.kind === 'new').length,
+    cleared: p.items.length === 0 && totalCards > 0,
+    nextDueAt: next?.d ?? null,
+    totalCards,
   };
 }
 

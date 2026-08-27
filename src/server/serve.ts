@@ -82,10 +82,21 @@ async function route(req: http.IncomingMessage, url: URL): Promise<unknown> {
     return api.corpus(db, url.searchParams.get('fn') ?? undefined);
   }
   if (m === 'GET' && pathname === '/api/progress') return api.report(db);
-  if (m === 'GET' && pathname === '/api/today') return api.todayQueue(db);
+  if (m === 'GET' && pathname === '/api/today') {
+    const b = Number(url.searchParams.get('budget') ?? '');
+    return api.todayQueue(db, Number.isFinite(b) && b > 0 ? b : undefined);
+  }
 
   const practice = pathname.match(/^\/api\/cards\/([\w-]+)\/practice$/);
-  if (m === 'GET' && practice) return api.practiceCard(db, practice[1]!);
+  if (m === 'GET' && practice) {
+    return api.practiceCard(db, practice[1]!, url.searchParams.get('stage') ?? undefined);
+  }
+
+  const copyM = pathname.match(/^\/api\/cards\/([\w-]+)\/steps\/(\d+)\/copy$/);
+  if (m === 'GET' && copyM) return api.copyTarget(db, copyM[1]!, Number(copyM[2]));
+
+  const clozeM = pathname.match(/^\/api\/cards\/([\w-]+)\/steps\/(\d+)\/cloze$/);
+  if (m === 'GET' && clozeM) return api.clozeTarget(db, clozeM[1]!, Number(clozeM[2]));
 
   const hintM = pathname.match(/^\/api\/cards\/([\w-]+)\/steps\/(\d+)\/hint$/);
   if (m === 'GET' && hintM) {
@@ -124,6 +135,12 @@ async function route(req: http.IncomingMessage, url: URL): Promise<unknown> {
 
     const delM = pathname.match(/^\/api\/cards\/([\w-]+)\/delete$/);
     if (delM) return api.removeCard(db, delM[1]!);
+
+    const clozeCk = pathname.match(/^\/api\/cards\/([\w-]+)\/steps\/(\d+)\/cloze$/);
+    if (clozeCk) {
+      const a = Array.isArray(body.answers) ? body.answers.map((x) => String(x)) : [];
+      return api.clozeCheck(db, clozeCk[1]!, Number(clozeCk[2]), a);
+    }
 
     const doneM = pathname.match(/^\/api\/cards\/([\w-]+)\/steps\/(\d+)\/done$/);
     if (doneM) {

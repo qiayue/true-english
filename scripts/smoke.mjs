@@ -67,8 +67,9 @@ check('导出卡片请求', await p.click('#btn-card-manual').then(() => p.waitF
 // ── 今日队列 ──
 await p.click('nav button[data-tab="practice"]'); await p.waitForTimeout(700);
 check('练习页落在「今天」', (await p.textContent('#pick-title')).includes('今天'));
-check('今日队列有新卡', (await p.textContent('#pick-sub')).includes('新卡'),
-  await p.textContent('#pick-sub'));
+const sub0 = await p.textContent('#pick-sub');
+check('今日队列有新卡', sub0.includes('新卡'), sub0);
+check('显示时间预算而非条数', sub0.includes('分钟') && sub0.includes('预算'), sub0);
 await p.click('#btn-show-all'); await p.waitForTimeout(500);
 check('可切到全部卡片', (await p.textContent('#pick-title')).includes('全部'));
 await p.click('#btn-show-all'); await p.waitForTimeout(500);
@@ -80,6 +81,43 @@ const list = p.locator('#card-list .item');
 await list.first().waitFor({ state: 'visible', timeout: 10_000 });
 check('卡片列表非空', (await list.count()) > 0);
 await list.first().click();
+await p.waitForTimeout(500);
+check('新卡默认走照抄级', (await p.textContent('#stage-tag')).includes('照抄'),
+  await p.textContent('#stage-tag'));
+
+// ── 照抄级：看 → 遮 → 打 ──
+await p.locator('#step-out').waitFor({ state: 'visible', timeout: 10_000 });
+check('照抄级先给原文看', (await p.textContent('#step-out')).includes(STEP_ANSWERS[0]));
+check('照抄级此时不给输入框', !(await p.isVisible('#step-input')), '看的时候不该能打字');
+check('照抄的主按钮是「遮住」', (await p.textContent('#btn-step-primary')).includes('遮住'));
+await p.click('#btn-step-primary'); await p.waitForTimeout(350);
+check('遮住后原文没了', !(await p.textContent('#step-out')).includes(STEP_ANSWERS[0]));
+check('遮住后可以打字', await p.isVisible('#step-input'));
+await p.fill('#step-input', STEP_ANSWERS[0]);
+await p.keyboard.press('Enter'); await p.waitForTimeout(500);
+check('照抄打对了判过', (await p.textContent('#btn-step-primary')).includes('下一步'),
+  await p.textContent('#btn-step-primary'));
+
+// ── 填空级：按漏点挖空，且不下发答案 ──
+await p.click('#btn-mode-toggle'); await p.waitForTimeout(200);
+await p.click('#mode-switch button[data-stage="cloze"]'); await p.waitForTimeout(700);
+const blanks = await p.locator('#cloze-body input').count();
+check('填空级有空位', blanks > 0, `${blanks} 个空`);
+check('空位标了考哪类漏点', (await p.locator('#cloze-body .leaktag').count()) > 0);
+// 先填错一个，确认判定与提示
+await p.locator('#cloze-body input').first().fill('zzz');
+await p.click('#btn-cloze-check'); await p.waitForTimeout(500);
+check('填错了给出正解', (await p.textContent('#cloze-out')).includes('错了'),
+  (await p.textContent('#cloze-out')).slice(0, 40));
+const firstAnswer = await p.evaluate(() => {
+  const m = document.querySelector('#cloze-out .mono.qing');
+  return m ? m.textContent.trim() : '';
+});
+check('正解可读', firstAnswer.length > 0, firstAnswer);
+
+// 切回逐句，把阶梯那段测完
+await p.click('#btn-mode-toggle'); await p.waitForTimeout(200);
+await p.click('#mode-switch button[data-stage="step"]'); await p.waitForTimeout(600);
 await p.locator('#step-input').waitFor({ state: 'visible', timeout: 10_000 });
 
 for (let i = 0; i < STEP_ANSWERS.length; i++) {
