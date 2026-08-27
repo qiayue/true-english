@@ -92,6 +92,17 @@ pre.payload{background:var(--surface);border:1px solid var(--rule);border-radius
 .wd{font-family:var(--mono);font-size:.9rem;line-height:1.9}
 .wd .del{color:var(--zhu);text-decoration:line-through;text-decoration-thickness:1px}
 .wd .add{color:var(--qing);font-weight:600}
+.link{background:none;border:none;color:var(--faint);font:inherit;font-size:.82rem;
+  cursor:pointer;padding:.45rem .2rem;text-decoration:underline;text-underline-offset:3px}
+.link:hover{color:var(--ink)}
+.cue{font-size:.88rem;color:var(--soft);line-height:1.6}
+.covered{background:repeating-linear-gradient(45deg,var(--surface-2),var(--surface-2) 6px,transparent 6px,transparent 12px);
+  border:1px dashed var(--rule);border-radius:3px;padding:.7rem .85rem;
+  font-size:.8rem;color:var(--faint);text-align:center;letter-spacing:.05em}
+.cue b{color:var(--ink)}
+.tries{font-family:var(--mono);font-size:.72rem;color:var(--faint)}
+.hit{border-left:3px solid var(--qing);background:var(--qing-wash);padding:.6rem .85rem;
+  display:flex;flex-direction:column;gap:.3rem}
 .hintbox{border-left:3px solid #C9962F;background:var(--surface);padding:.55rem .8rem;
   font-family:var(--mono);font-size:.85rem;white-space:pre-wrap;line-height:1.8}
 @media(prefers-color-scheme:dark){.hintbox{border-left-color:#D6B45C}}
@@ -157,23 +168,27 @@ pre.payload{background:var(--surface);border:1px solid var(--rule);border-radius
     <div class="row">
       <button class="act ghost" id="btn-back">← 换一张</button>
       <span class="tag" id="drill-level"></span>
-      <span id="mode-switch" class="row" style="gap:.35rem;margin-left:auto"></span>
+      <button class="link" id="btn-mode-toggle" style="margin-left:auto">⋯</button>
+      <span id="mode-switch" class="row hidden" style="gap:.35rem"></span>
     </div>
 
-    <!-- 阶梯模式：一次只写一小段 -->
+    <!-- 阶梯模式：状态机驱动，一次只呈现一件该做的事 -->
     <div id="ladder" class="hidden" style="display:flex;flex-direction:column;gap:.9rem">
       <div id="step-dots" class="row" style="gap:.3rem"></div>
       <div class="card">
         <span class="faint mono" style="font-size:.68rem;letter-spacing:.1em" id="step-label"></span>
         <div class="gloss" id="step-gloss"></div>
       </div>
+      <div id="step-out"></div>
+      <div id="step-cue" class="cue"></div>
       <textarea id="step-input" rows="2" placeholder="只写这一小段"></textarea>
       <div class="row">
-        <button class="act" id="btn-step-check">对照</button>
-        <button class="act ghost" id="btn-step-hint">提示</button>
-        <button class="act ghost" id="btn-step-next">下一步 →</button>
+        <button class="act" id="btn-step-primary"></button>
+        <button class="link" id="btn-step-hint">卡住了？给点提示</button>
+        <button class="link hidden" id="btn-step-accept">我这么写也对，跳过</button>
+        <button class="link hidden" id="btn-step-peek">再看一眼</button>
+        <button class="link hidden" id="btn-step-copy">看着原文抄一遍</button>
       </div>
-      <div id="step-out"></div>
     </div>
 
     <!-- 整段模式 -->
@@ -339,7 +354,7 @@ async function loadCards() {
     el.querySelectorAll('.item').forEach((b) => b.onclick = () => openCard(b.dataset.id));
   } catch (e) { showErr(el, e); }
 }
-let STEP = 0, HINT = 0;
+let STEP = 0, HINT = 0, TRIES = 0, PHASE = 'write', COPY = false, LAST_DIFF = null;
 
 async function openCard(id) {
   CARD = await call(`/api/cards/${id}/practice`);
@@ -354,15 +369,18 @@ async function openCard(id) {
   $('#drill').classList.remove('hidden');
 
   const hasSteps = (CARD.steps ?? []).length > 0;
+  $('#btn-mode-toggle').classList.toggle('hidden', !hasSteps);
   $('#mode-switch').innerHTML = hasSteps
     ? `<button class="act ghost" data-mode="ladder">逐句练</button>
        <button class="act ghost" data-mode="whole">直接写整段</button>`
     : '';
   $('#mode-switch').querySelectorAll('button').forEach((b) =>
-    b.onclick = () => setMode(b.dataset.mode));
-  // 默认逐句 —— 一次性面对整段是初学者弃坑的主因
+    b.onclick = () => { setMode(b.dataset.mode); $('#mode-switch').classList.add('hidden'); });
   setMode(hasSteps ? 'ladder' : 'whole');
 }
+
+// 模式切换默认收起来 —— 练习时它不该一直杵在屏幕上抢注意力
+$('#btn-mode-toggle').onclick = () => $('#mode-switch').classList.toggle('hidden');
 
 function setMode(mode) {
   $('#ladder').classList.toggle('hidden', mode !== 'ladder');
@@ -373,145 +391,159 @@ function setMode(mode) {
   else $('#attempt').focus();
 }
 
+/**
+ * 三个状态，一次只呈现一件该做的事。
+ * 关键规则：**「下一步」只在写对之后出现。**
+ * 写错了就放行，那一句就再也没练过 —— 没有重复就没有肌肉记忆，
+ * 学习者的原话是「没有学习的感觉」，根子就在这里。
+ */
+const PHASES = {
+  write: {
+    cue: '只看中文，把这一句写出来。想不起来就先写个大概，写错不要紧。',
+    primary: '对照',
+  },
+  // 看 → 遮住 → 默写 → 对照。
+  // 原文摆在眼前时的「再写一遍」是照抄，几乎不产生记忆；
+  // 必须先把答案遮掉，逼出一次真正的提取，重复才有意义。
+  study: {
+    cue: '看清楚差在哪。记住之后点下面 —— <b>原文会遮起来，你凭记忆写</b>。',
+    primary: '遮住，我来写',
+  },
+  recall: { cue: '凭记忆写一遍。', primary: '再对照' },
+  copy: {
+    cue: '这一步卡住了。<b>照着原文抄一遍</b>，手过一遍比看十遍管用。',
+    primary: '对照',
+  },
+  hit: { cue: '这一句拿下了。', primary: '下一步 →' },
+};
+
+function setPhase(p) {
+  PHASE = p;
+  const cfg = PHASES[p];
+  $('#step-cue').innerHTML = cfg.cue + (TRIES > 1 && p !== 'hit' ? ` <span class="tries">第 ${TRIES} 次</span>` : '');
+  $('#btn-step-primary').textContent = cfg.primary;
+  // study 阶段没什么可打的，把输入框收起来，屏幕上只留「看」这一件事
+  $('#step-input').classList.toggle('hidden', p === 'hit' || p === 'study');
+  // 答案已经看过了就别再给提示，那是给还没看过的人的
+  $('#btn-step-hint').classList.toggle('hidden', p !== 'write');
+  $('#btn-step-accept').classList.toggle('hidden', p !== 'study');
+  $('#btn-step-peek').classList.toggle('hidden', p !== 'recall');
+  // 试了三次还没对，抄写才有意义 —— 再瞪着看已经没用了
+  $('#btn-step-copy').classList.toggle('hidden', !(p === 'study' && TRIES >= 3));
+  if (p !== 'hit' && p !== 'study') $('#step-input').focus();
+}
+
+function hideAnswer() {
+  $('#step-out').innerHTML = `<div class="covered">原文已遮起</div>`;
+}
+
 function renderStep() {
   const steps = CARD.steps;
-  const s = steps[STEP];
-  HINT = 0;
+  STEP = Math.min(STEP, steps.length - 1);
+  HINT = 0; TRIES = 0; COPY = false; LAST_DIFF = null;
   $('#step-dots').innerHTML = steps.map((_, i) =>
     `<span class="dot ${i < STEP ? 'done' : i === STEP ? 'cur' : ''}"></span>`).join('');
   $('#step-label').textContent = `第 ${STEP + 1} / ${steps.length} 步`;
-  $('#step-gloss').textContent = s.glossZh;
+  $('#step-gloss').textContent = steps[STEP].glossZh;
   $('#step-input').value = '';
   $('#step-out').innerHTML = '';
-  $('#btn-step-next').textContent = STEP === steps.length - 1 ? '连起来写整条 →' : '下一步 →';
-  $('#step-input').focus();
+  setPhase('write');
 }
 
-$('#btn-step-check').onclick = async () => {
-  const out = $('#step-out');
+function renderDiff(d) {
+  const line = d.ops.map((o) =>
+    o.type === 'equal' ? esc(o.text)
+    : o.type === 'del' ? `<span class="del">${esc(o.text)}</span>`
+    : `<span class="add">${esc(o.text)}</span>`).join(' ');
+  $('#step-out').innerHTML = `<div class="card">
+    <div class="row" style="justify-content:space-between">
+      <span class="faint mono" style="font-size:.68rem;letter-spacing:.1em">对照</span>
+      <span class="mono" style="font-size:.8rem">命中 ${d.hit}/${d.total}</span></div>
+    <div class="wd">${line}</div>
+    <div class="split"><span class="t">原文</span><span class="mono qing">${esc(d.en)}</span></div>
+  </div>`;
+}
+
+async function doCheck() {
   const text = $('#step-input').value.trim();
-  if (!text) { out.innerHTML = '<div class="err">先写点什么。</div>'; return; }
+  if (!text) { $('#step-cue').innerHTML = '<span class="zhu">先写点什么。</span>'; return; }
+  TRIES++;
   try {
     const d = await call(`/api/cards/${CARD.id}/steps/${STEP}/check`, { text });
-    const line = d.ops.map((o) =>
-      o.type === 'equal' ? esc(o.text)
-      : o.type === 'del' ? `<span class="del">${esc(o.text)}</span>`
-      : `<span class="add">${esc(o.text)}</span>`).join(' ');
-    const pct = d.total ? Math.round(d.hit / d.total * 100) : 0;
-    out.innerHTML = `<div class="card">
-      <div class="row" style="justify-content:space-between">
-        <span class="faint mono" style="font-size:.68rem;letter-spacing:.1em">对照</span>
-        <span class="mono" style="font-size:.8rem">命中 ${d.hit}/${d.total}　${pct}%</span></div>
-      <div class="wd">${line}</div>
-      <div class="split"><span class="t">原文</span><span class="mono qing">${esc(d.en)}</span></div>
-      <p style="font-size:.82rem">这是<strong>对照</strong>，不是判定 —— 逐词比对分不出「错」和「一样好」。
-        你要是换了个同样地道的说法，这里照样标差异。真正的判定在最后写整条时给。</p>
-    </div>`;
-  } catch (e) { showErr(out, e); }
+    // 「写对」= 参考句每个词都命中，且没有多写 —— 大小写和标点已在服务端规范化
+    const clean = d.hit === d.total && d.ops.every((o) => o.type !== 'del');
+    if (clean) {
+      $('#step-out').innerHTML = `<div class="hit">
+        <span class="qing"><strong>✓ 写对了</strong>${TRIES > 1 ? ` <span class="tries">练了 ${TRIES} 次</span>` : ''}</span>
+        <span class="mono qing">${esc(d.en)}</span></div>`;
+      setPhase('hit');
+    } else {
+      LAST_DIFF = d;
+      renderDiff(d);
+      setPhase('study');
+      $('#step-input').value = '';
+    }
+  } catch (e) { showErr($('#step-out'), e); }
+}
+
+$('#btn-step-primary').onclick = () => {
+  if (PHASE === 'study') { hideAnswer(); setPhase('recall'); return; }
+  if (PHASE === 'hit') {
+    if (STEP < CARD.steps.length - 1) { STEP++; renderStep(); return; }
+    // 阶梯走完 → 整段。小步是建立手感，整条才是产生洞察的地方。
+    setMode('whole');
+    $('#result').innerHTML =
+      '<div class="ok" style="margin-top:.5rem">阶梯走完了。现在凭中文把<strong>整条</strong>连起来写一遍 —— 这一次才是真正的批改。</div>';
+    return;
+  }
+  void doCheck();
+};
+
+// 打字练习不该一直伸手去点鼠标。Enter 就是当前那个主按钮。
+$('#step-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); void doCheck(); }
+});
+document.addEventListener('keydown', (e) => {
+  if (PHASE === 'hit' && e.key === 'Enter' && !$('#ladder').classList.contains('hidden')) {
+    e.preventDefault(); $('#btn-step-primary').click();
+  }
+});
+
+/**
+ * 逐词对比分不出「错」和「一样好」。学习者写了个同样地道的说法，
+ * 强按着他改成原文就是错误的教学 —— 所以必须留这个出口。
+ * 真正的判定在最后写整条时由完整批改给出。
+ */
+$('#btn-step-accept').onclick = () => {
+  $('#step-out').innerHTML += `<p class="faint" style="font-size:.82rem;margin-top:.4rem">
+    已跳过。这处到底算不算对，最后写整条时的批改会给出判定。</p>`;
+  setPhase('hit');
+};
+
+$('#btn-step-peek').onclick = () => {
+  if (LAST_DIFF) renderDiff(LAST_DIFF);
+  setPhase('study');
+};
+
+$('#btn-step-copy').onclick = async () => {
+  const h = await call(`/api/cards/${CARD.id}/steps/${STEP}/hint?level=3`);
+  COPY = true;
+  $('#step-out').innerHTML = `<div class="hintbox"><span class="faint">原文</span>\n${esc(h.body)}</div>`;
+  $('#step-input').value = '';
+  setPhase('copy');
 };
 
 $('#btn-step-hint').onclick = async () => {
-  const out = $('#step-out');
   HINT = Math.min(3, HINT + 1);
   try {
     const h = await call(`/api/cards/${CARD.id}/steps/${STEP}/hint?level=${HINT}`);
-    $('#btn-step-hint').textContent = HINT >= 3 ? '提示' : `再给点提示 (${HINT}/3)`;
+    $('#btn-step-hint').textContent = HINT >= 3 ? '卡住了？给点提示' : `再给点提示 (${HINT}/3)`;
     if (HINT >= 3) HINT = 0;
-    out.innerHTML = `<div class="hintbox"><span class="faint">${esc(h.label)}</span>\n${esc(h.body)}</div>`;
-  } catch (e) { showErr(out, e); }
+    $('#step-out').innerHTML =
+      `<div class="hintbox"><span class="faint">${esc(h.label)}</span>\n${esc(h.body)}</div>`;
+    $('#step-input').focus();
+  } catch (e) { showErr($('#step-out'), e); }
 };
-
-$('#btn-step-next').onclick = () => {
-  if (STEP < CARD.steps.length - 1) { STEP++; renderStep(); return; }
-  // 走完阶梯 → 整段模式。小步是建立手感，整条才是产生洞察的地方。
-  setMode('whole');
-  $('#result').innerHTML =
-    '<div class="ok" style="margin-top:.5rem">阶梯走完了。现在凭中文把<strong>整条</strong>连起来写一遍 —— 这一次才是真正的批改。</div>';
-};
-$('#btn-back').onclick = () => {
-  $('#drill').classList.add('hidden'); $('#pick').classList.remove('hidden'); loadCards();
-};
-
-$('#btn-submit').onclick = async () => {
-  const res = $('#result'); const attempt = $('#attempt').value.trim();
-  if (!attempt) { res.innerHTML = '<div class="err">先写点什么再提交。</div>'; return; }
-  try {
-    if (AUTO) {
-      res.innerHTML = '<p>批改中…</p>';
-      renderReview(await call(`/api/cards/${CARD.id}/review`, { attempt }));
-    } else {
-      const r = await call(`/api/cards/${CARD.id}/grade-request`, { attempt });
-      PENDING = { cardId: r.cardId, attempt: r.attempt };
-      $('#grade-payload').textContent = r.payload;
-      $('#grade-manual').classList.remove('hidden');
-      res.innerHTML = '';
-      $('#grade-payload').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    }
-  } catch (e) { showErr(res, e); }
-};
-$('#btn-copy-grade').onclick = (e) => copy($('#grade-payload').textContent, e.target);
-$('#btn-import-grade').onclick = async () => {
-  const res = $('#result');
-  try {
-    renderReview(await call('/api/reviews/import', { ...PENDING, json: $('#grade-json').value }));
-    $('#grade-manual').classList.add('hidden');
-  } catch (e) { showErr(res, e); }
-};
-
-function renderReview(d) {
-  const r = d.review;
-  const pct = r.overlap.total > 0 ? Math.round(r.overlap.matched / r.overlap.total * 100) : 0;
-  const leaks = {};
-  r.items.forEach((i) => { if (i.leak) leaks[i.leak] = (leaks[i.leak] ?? 0) + 1; });
-
-  let h = `<div style="display:flex;flex-direction:column;gap:1.1rem;margin-top:.5rem">`;
-  h += `<div class="card">
-    <div class="split"><span class="t">你写的</span><span class="mono zhu">${esc($('#attempt').value.trim())}</span></div>
-    <div class="split"><span class="t">原文</span><span class="mono qing">${esc(d.original)}</span></div>
-  </div>`;
-  h += `<div><div class="row" style="justify-content:space-between">
-      <span class="faint mono" style="font-size:.7rem;letter-spacing:.1em">回译重合度</span>
-      <span class="mono"><b>${pct}%</b> <span class="faint">${r.overlap.matched}/${r.overlap.total} 意义单元</span></span>
-    </div><div class="bar" style="margin-top:.35rem"><i style="width:${pct}%"></i></div></div>`;
-  if (Object.keys(leaks).length) {
-    h += `<div class="mono" style="font-size:.82rem"><span class="faint">硬伤　</span>` +
-      Object.entries(leaks).sort((a,b)=>b[1]-a[1]).map(([k,v]) => `<span class="zhu">${LEAK[k]??k} ×${v}</span>`).join('　') + `</div>`;
-  }
-  if (r.items.length) {
-    h += '<div>';
-    r.items.forEach((it) => {
-      h += `<div class="diff ${esc(it.verdict)}">
-        <div class="hd"><span class="tag">${CATEGORY[it.category] ?? it.category}${it.leak ? ' · ' + (LEAK[it.leak] ?? it.leak) : ''}</span>
-          <span class="mono" style="font-size:.76rem">${VERDICT[it.verdict] ?? it.verdict}</span></div>
-        <div class="split"><span class="t">你</span><span class="mono zhu">${esc(it.mine)}</span></div>
-        <div class="split"><span class="t">原</span><span class="mono qing">${esc(it.native)}</span></div>
-        <div class="ex">${esc(it.explainZh)}</div>
-        ${it.rule ? `<div class="rule">规则 · ${esc(it.rule)}</div>` : ''}
-      </div>`;
-    });
-    h += '</div>';
-  }
-  if (r.strengths?.length) {
-    h += `<div class="ok"><strong>做对的地方</strong><br>` +
-      r.strengths.map((s) => '· ' + esc(s)).join('<br>') + `</div>`;
-  }
-  if (r.verdictZh) h += `<p style="color:var(--ink)"><strong>总评</strong>　${esc(r.verdictZh)}</p>`;
-
-  if (d.frames?.length) {
-    h += `<div class="card"><span class="faint mono" style="font-size:.68rem;letter-spacing:.1em">句型骨架 · 当天就用它说 3 件你自己的事</span>` +
-      d.frames.map((f) => `<div><span class="mono" style="color:#8A6D1F">${esc(f.pattern)}</span>
-        <span class="faint" style="font-size:.82rem"> [${esc(f.fn)}] ${esc(f.gloss_zh)}</span></div>`).join('') + `</div>`;
-  }
-  if (d.chunks?.length) {
-    h += `<div class="card"><span class="faint mono" style="font-size:.68rem;letter-spacing:.1em">词块 · 已入库</span>` +
-      d.chunks.map((c) => `<div><span class="mono qing">${esc(c.text)}</span>
-        <span class="faint" style="font-size:.82rem"> [${esc(c.fn)}] ${esc(c.gloss_zh)}</span></div>`).join('') + `</div>`;
-  }
-  h += '</div>';
-  $('#result').innerHTML = h;
-}
-
-window.__render = renderReview;
 
 // ── 语料库 ──
 let FN = '';
