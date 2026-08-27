@@ -82,11 +82,27 @@ your-domain.com {
 
 ---
 
-## 方案 C：先不上公网
+## 方案 C：本机跑（最简单，先自己用就选这个）
 
-如果只是想在手机上用，最省事的是不部署：本机 `npm run dev`，
-手机装 Tailscale 连到同一台机器。零成本、零攻击面，
-也不用管口令和证书。适合先自己用一两周验证方法有没有效。
+```bash
+npm install
+npm run dev          # → http://localhost:5173
+```
+
+**要 Node 22.5+**（`node:sqlite` 是 22.5 才加的）。版本不够会被拦下并给出升级指引。
+
+不用配任何东西。没设 `TRUE_ENGLISH_TOKEN` 时只绑 `127.0.0.1` ——
+本机能用、公网连不到，正是本机自用想要的。
+
+- 端口撞了（5173 是 Vite 默认端口）：`PORT=5300 npm run dev`
+- 想先看效果：另开终端跑 `npm run seed:example`
+- 数据在 `data/true-english.db`，删掉就是重来
+- 备份：把那个文件拷走就行
+
+**想在手机上用**：装 Tailscale，手机和电脑连同一个 tailnet，
+用电脑的 tailnet IP 访问。但注意 —— 这时服务器还是只绑 `127.0.0.1`，
+Tailscale 访问不到。要么设一个 `TRUE_ENGLISH_TOKEN`（会改绑 `0.0.0.0`，
+但 Tailscale 网络本身已经是私有的），要么用 `tailscale serve` 做本地转发。
 
 ---
 

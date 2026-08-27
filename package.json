@@ -14,7 +14,7 @@
     "corpus": "tsx src/cli/corpus.ts",
     "demo": "tsx src/cli/demo.ts",
     "dev": "tsx src/server/index.ts",
-    "seed:example": "bash scripts/seed-example.sh",
+    "seed:example": "node scripts/seed-example.mjs",
     "shot": "node scripts/screenshot.mjs",
     "start": "tsx src/server/index.ts"
   },

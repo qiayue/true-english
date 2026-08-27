@@ -186,6 +186,25 @@ const server = http.createServer((req, res) => {
     });
 });
 
+// 5173 是 Vite 的默认端口，本机跑前端项目的人很容易撞上。
+// 直接甩一个 EADDRINUSE 堆栈没人看得懂，给出人话和解法。
+server.on('error', (e: NodeJS.ErrnoException) => {
+  if (e.code === 'EADDRINUSE') {
+    console.error(`
+  端口 ${PORT} 已被占用（5173 是 Vite 的默认端口，很容易撞上）。
+
+  换一个端口：
+    PORT=5300 npm run dev
+
+  或者看看是谁占着：
+    lsof -i :${PORT}          （macOS / Linux）
+    netstat -ano | findstr ${PORT}   （Windows）
+`);
+    process.exit(1);
+  }
+  throw e;
+});
+
 server.listen(PORT, BIND_HOST, () => {
   const mode = api.hasCredentials() ? '自动批改' : '手工批改（未检测到 API key）';
   console.log(`\n  true-english  ·  ${mode}`);
