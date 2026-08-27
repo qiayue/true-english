@@ -13,10 +13,16 @@ import fs from 'node:fs';
 const html = fs.readFileSync('src/server/app.html', 'utf8');
 const errs = [];
 
-// ① 每个 id="btn-*" 都必须有 onclick 绑定
+// ① 每个 id="btn-*" 都必须绑上 handler。
+// 两种写法都算：直接 $('#x').onclick，以及动态生成后先取到变量再绑
+// （const nb = $('#x'); if (nb) nb.onclick = ...）。
+// 后者在动态插入的节点上是正常写法，不该为了迁就检查器把代码写歪。
 const ids = [...html.matchAll(/id="(btn-[\w-]+)"/g)].map((m) => m[1]);
 for (const id of new Set(ids)) {
-  if (!html.includes(`$('#${id}').onclick`)) errs.push(`按钮 ${id} 没有 handler`);
+  if (html.includes(`$('#${id}').onclick`)) continue;
+  const at = html.indexOf(`$('#${id}')`);
+  if (at >= 0 && html.slice(at, at + 240).includes('onclick')) continue;
+  errs.push(`按钮 ${id} 没有 handler`);
 }
 
 // ② JS 里引用的每个 $('#x') 都必须在 HTML 里真的存在

@@ -97,6 +97,25 @@ const res = await p.textContent('#result');
 check('批改结果渲染', res.includes('回译重合度') && res.includes('做对的地方'), res.slice(0, 60));
 check('三分判定文案', res.includes('错') && res.includes('母语者不会这么说'));
 
+// ── 收尾流程：出声 → 仿写 → 存档（日循环的后半截）──
+check('收尾流程出现', await p.isVisible('#finish'));
+check('朗读区有原文', (await p.textContent('#finish')).includes('出声读三遍'));
+const chips = await p.$$('#finish .chip');
+check('骨架/词块可点击填入', chips.length > 0, `${chips.length} 个 chip`);
+if (chips.length) {
+  await chips[0].click(); await p.waitForTimeout(200);
+  check('点 chip 填进输入框', (await p.inputValue('#mine-tweet')).length > 0);
+}
+await p.fill('#mine-tweet',
+  'The whole thing runs on a new CMS built on Cloudflare Workers.');
+await p.waitForTimeout(700);
+check('实时复用计数', (await p.textContent('#reuse-live')).includes('复用'),
+  await p.textContent('#reuse-live'));
+await p.click('#btn-archive'); await p.waitForTimeout(700);
+const arch = await p.textContent('#archive-out');
+check('仿写存档', arch.includes('存好了') || arch.includes('还差'), arch.slice(0, 50));
+check('存档后给下一步出口', await p.isVisible('#btn-next-card') || arch.includes('还差'));
+
 // ── 换一张 ──
 await p.click('#btn-back'); await p.waitForTimeout(500);
 check('换一张回到列表', await p.isVisible('#card-list'));

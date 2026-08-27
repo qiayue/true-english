@@ -107,6 +107,21 @@ pre.payload{background:var(--surface);border:1px solid var(--rule);border-radius
 .tries{font-family:var(--mono);font-size:.72rem;color:var(--faint)}
 .hit{border-left:3px solid var(--qing);background:var(--qing-wash);padding:.6rem .85rem;
   display:flex;flex-direction:column;gap:.3rem}
+.seam{height:1px;background:var(--rule)}
+.stepnum{display:flex;align-items:center;gap:.55rem;font-weight:600;font-size:.98rem}
+.stepnum>span{display:grid;place-items:center;width:1.4rem;height:1.4rem;border-radius:50%;
+  background:var(--ink);color:var(--paper);font-family:var(--mono);font-size:.75rem;flex-shrink:0}
+.chk{display:inline-flex;align-items:center;gap:.4rem;font-size:.85rem;color:var(--soft);
+  cursor:pointer;margin-top:.55rem}
+.chk input{width:auto;margin:0}
+.scaff{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;margin-top:.5rem}
+.scaff .lbl{font-size:.68rem;letter-spacing:.1em;width:100%}
+.chip{font-family:var(--mono);font-size:.78rem;padding:.3rem .55rem;border-radius:3px;cursor:pointer;
+  background:var(--surface);border:1px solid var(--rule);color:#8A6D1F;text-align:left}
+.chip:hover{border-color:var(--qing)}
+.chip.qingchip{color:var(--qing)}
+.chip em{font-style:normal;color:var(--faint);font-size:.7rem;margin-left:.3rem}
+@media(prefers-color-scheme:dark){.chip{color:#D6B45C}.chip.qingchip{color:var(--qing)}}
 .hintbox{border-left:3px solid #C9962F;background:var(--surface);padding:.55rem .8rem;
   font-family:var(--mono);font-size:.85rem;white-space:pre-wrap;line-height:1.8}
 @media(prefers-color-scheme:dark){.hintbox{border-left-color:#D6B45C}}
@@ -638,18 +653,102 @@ function renderReview(d) {
   }
   if (r.verdictZh) h += `<p style="color:var(--ink)"><strong>总评</strong>　${esc(r.verdictZh)}</p>`;
 
-  if (d.frames?.length) {
-    h += `<div class="card"><span class="faint mono" style="font-size:.68rem;letter-spacing:.1em">句型骨架 · 当天就用它说 3 件你自己的事</span>` +
-      d.frames.map((f) => `<div><span class="mono" style="color:#8A6D1F">${esc(f.pattern)}</span>
-        <span class="faint" style="font-size:.82rem"> [${esc(f.fn)}] ${esc(f.gloss_zh)}</span></div>`).join('') + `</div>`;
-  }
-  if (d.chunks?.length) {
-    h += `<div class="card"><span class="faint mono" style="font-size:.68rem;letter-spacing:.1em">词块 · 已入库</span>` +
-      d.chunks.map((c) => `<div><span class="mono qing">${esc(c.text)}</span>
-        <span class="faint" style="font-size:.82rem"> [${esc(c.fn)}] ${esc(c.gloss_zh)}</span></div>`).join('') + `</div>`;
-  }
   h += '</div>';
   $('#result').innerHTML = h;
+  renderFinish(d);
+}
+
+/**
+ * 批改之后的收尾 —— 日循环的后半截。
+ *
+ * 方法论里日循环是五步：选 → 回译 diff → 出声 → 仿写并发布 → 归档。
+ * 应用原来只做到第二步，批改完看一眼骨架就没了下文，
+ * 那些骨架和词块**一次都没被用过** —— 跟「写错了就翻篇」是同一个病。
+ *
+ * 最要紧的是仿写：方法论自己写的是「当天必须用它说 3 件你自己的事，
+ * 不许『以后再用』」。所以它必须紧接在批改后面，不能扔在另一个标签页里。
+ */
+function renderFinish(d) {
+  const frames = d.frames ?? [];
+  const chunks = d.chunks ?? [];
+  const wrap = document.createElement('div');
+  wrap.id = 'finish';
+  wrap.style.cssText = 'display:flex;flex-direction:column;gap:1.1rem;margin-top:1.6rem';
+
+  wrap.innerHTML = `
+    <div class="seam"></div>
+
+    <div>
+      <div class="stepnum"><span>1</span>出声读三遍</div>
+      <p style="margin:.35rem 0 .6rem">目标是写作，为什么要读出声？因为<strong>冠词和介词的错误，眼睛看不出来，耳朵能听出来</strong>。
+        写作者的语感本质上是「能在脑子里听见这句话」—— 没有它，你永远无法自我校对。3 分钟，很便宜。</p>
+      <div class="card"><div class="mono qing" style="font-size:1rem;line-height:1.9">${esc(d.original)}</div></div>
+      <label class="chk"><input type="checkbox" id="chk-read"> 读完三遍了</label>
+    </div>
+
+    <div>
+      <div class="stepnum"><span>2</span>现在轮到你了</div>
+      <p style="margin:.35rem 0 .7rem">今天的骨架不是拿来收藏的。<strong>用它说一件你自己的事</strong> ——
+        当天不用，就永远不会用。不复用的语料库是坟场。</p>
+
+      ${frames.length ? `<div class="scaff"><span class="faint mono lbl">骨架 · 点一下填进去</span>${
+        frames.map((f) => `<button class="chip" data-ins="${esc(f.pattern)}">${esc(f.pattern)}
+          <em>${esc(f.fn)}</em></button>`).join('')}</div>` : ''}
+
+      ${chunks.length ? `<div class="scaff"><span class="faint mono lbl">词块 · 至少用上 2 个</span>${
+        chunks.map((c) => `<button class="chip qingchip" data-ins="${esc(c.text)}">${esc(c.text)}
+          <em>${esc(c.fn)}</em></button>`).join('')}</div>` : ''}
+
+      <textarea id="mine-tweet" rows="3" style="margin-top:.7rem"
+        placeholder="写一条你自己的推文，说一件你自己的事"></textarea>
+      <div class="row" style="margin-top:.55rem">
+        <button class="act" id="btn-archive">检查并存档</button>
+        <label class="chk"><input type="checkbox" id="chk-posted"> 已经发出去了</label>
+        <span class="mono" id="reuse-live" style="font-size:.8rem;margin-left:auto"></span>
+      </div>
+      <div id="archive-out" style="margin-top:.6rem"></div>
+    </div>`;
+
+  $('#result').appendChild(wrap);
+
+  wrap.querySelectorAll('.chip').forEach((b) => b.onclick = () => {
+    const t = $('#mine-tweet');
+    t.value = (t.value.trim() + ' ' + b.dataset.ins).trim();
+    t.focus(); liveReuse();
+  });
+
+  let timer;
+  const liveReuse = () => {
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      const text = $('#mine-tweet').value.trim();
+      if (!text) { $('#reuse-live').textContent = ''; return; }
+      try {
+        const r = await call('/api/reuse', { text });
+        $('#reuse-live').innerHTML = r.ok
+          ? `<span class="qing">复用 ${r.hits.length} 个 ✓</span>`
+          : `<span class="faint">复用 ${r.hits.length} 个，还差 ${r.need}</span>`;
+      } catch { /* 实时反馈失败不打扰 */ }
+    }, 350);
+  };
+  $('#mine-tweet').addEventListener('input', liveReuse);
+
+  $('#btn-archive').onclick = async () => {
+    const out = $('#archive-out');
+    try {
+      const r = await call('/api/compose', {
+        text: $('#mine-tweet').value, posted: $('#chk-posted').checked,
+      });
+      out.innerHTML = r.ok
+        ? `<div class="ok"><strong>存好了 · 复用了 ${r.hits.length} 个词块</strong><br>` +
+          r.hits.map((x) => `<span class="mono qing">${esc(x.text)}</span>`).join('　') +
+          `<div style="margin-top:.7rem"><button class="act" id="btn-next-card">这张过了，下一张 →</button></div></div>`
+        : `<div class="err">只复用了 ${r.hits.length} 个词块，还差 ${r.need} 个。<br>
+           <span class="faint">铁律：每条自己写的推文至少用 2 个。已经存下了，但这一条不算数。</span></div>`;
+      const nb = $('#btn-next-card');
+      if (nb) nb.onclick = () => $('#btn-back').click();
+    } catch (e) { showErr(out, e); }
+  };
 }
 
 window.__render = renderReview;

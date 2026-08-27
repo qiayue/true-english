@@ -119,6 +119,8 @@ async function route(req: http.IncomingMessage, url: URL): Promise<unknown> {
       return api.importReview(db, str(body.cardId, 'cardId'), str(body.attempt, 'attempt'), str(body.json, 'json'));
     }
 
+    if (pathname === '/api/reuse') return api.checkReuse(db, str(body.text, 'text'));
+
     if (pathname === '/api/compose') {
       return api.compose(db, str(body.text, 'text'), body.posted === true);
     }

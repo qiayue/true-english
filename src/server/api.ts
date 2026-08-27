@@ -166,6 +166,19 @@ function cardOwns(db: DatabaseSync, cardId: string, table: 'frames' | 'chunks', 
   return row?.card_id === cardId;
 }
 
+/**
+ * 只查复用、不入库。给仿写台做实时反馈用。
+ *
+ * 和 compose 分开是因为语义不同：边打字边看「用了几个词块」是**查询**，
+ * 点「存档」才是**写入**。混在一起会让每次按键都往库里塞一条草稿。
+ */
+export function checkReuse(db: DatabaseSync, text: string) {
+  const t = text.trim();
+  if (!t) return { hits: [], ok: false, need: 2 };
+  const hits = detectReuse(db, t);
+  return { hits, ok: hits.length >= 2, need: Math.max(0, 2 - hits.length) };
+}
+
 /** 仿写入库 + 词块复用检测（纯机械，不调 LLM） */
 export function compose(db: DatabaseSync, text: string, posted: boolean) {
   const t = text.trim();
