@@ -1,0 +1,30 @@
+# Fly.io 部署配置
+#
+# 关键点是 [mounts]：node:sqlite 写本地文件，必须挂持久卷，
+# 否则每次重启数据就没了。这也是为什么 Vercel / Cloudflare Workers
+# 这类无状态 serverless 平台跑不了这个应用。
+
+app = "true-english"
+primary_region = "nrt"   # 东京。改成离你最近的：sin 新加坡 / hkg 香港 / lax 洛杉矶
+
+[build]
+
+[env]
+  PORT = "8080"
+  TRUE_ENGLISH_DB = "/data/true-english.db"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # 闲置时自动停机、有请求再拉起。单人使用一个月基本在免费额度内。
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[mounts]
+  source = "true_english_data"
+  destination = "/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

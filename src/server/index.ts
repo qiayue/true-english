@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { open } from '../core/store.js';
 import * as api from './api.js';
 import { ApiError } from './api.js';
+import { AUTH_ON, BIND_HOST, LOGIN_PAGE, isAuthed, isLockedOut, login } from './auth.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const HTML = path.join(here, 'app.html');
@@ -12,6 +13,24 @@ const HTML = path.join(here, 'app.html');
 const PORT = Number(process.env.PORT ?? 5173);
 const DB_FILE = process.env.TRUE_ENGLISH_DB ?? 'data/true-english.db';
 const db = open(DB_FILE);
+
+function readRaw(req: http.IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    req.on('data', (c: Buffer) => {
+      size += c.length;
+      if (size > 2_000_000) {
+        reject(new ApiError('请求过大', 413));
+        req.destroy();
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    req.on('error', reject);
+  });
+}
 
 function readBody(req: http.IncomingMessage): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
@@ -100,8 +119,52 @@ async function route(req: http.IncomingMessage, url: URL): Promise<unknown> {
   throw new ApiError('没有这个接口', 404);
 }
 
+function sendHtml(res: http.ServerResponse, body: string, status = 200, extra: Record<string, string> = {}) {
+  res.writeHead(status, { 'content-type': 'text/html; charset=utf-8', ...extra });
+  res.end(body);
+}
+
 const server = http.createServer((req, res) => {
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
+
+  // —— 登录 ——
+  if (AUTH_ON && url.pathname === '/login') {
+    if (req.method === 'GET') {
+      sendHtml(res, LOGIN_PAGE.replace('__ERR__', ''));
+      return;
+    }
+    if (req.method === 'POST') {
+      if (isLockedOut(req)) {
+        sendHtml(res, LOGIN_PAGE.replace('__ERR__', '尝试太多次了，15 分钟后再试。'), 429);
+        return;
+      }
+      void readRaw(req)
+        .then((raw) => {
+          const token = new URLSearchParams(raw).get('token') ?? '';
+          const cookie = login(req, token);
+          if (!cookie) {
+            sendHtml(res, LOGIN_PAGE.replace('__ERR__', '口令不对。'), 401);
+            return;
+          }
+          res.writeHead(303, { location: '/', 'set-cookie': cookie });
+          res.end();
+        })
+        .catch(() => sendHtml(res, LOGIN_PAGE.replace('__ERR__', '出错了，重试一下。'), 400));
+      return;
+    }
+  }
+
+  // —— 鉴权闸门：页面和 API 都走这里 ——
+  if (!isAuthed(req)) {
+    if (url.pathname.startsWith('/api/')) {
+      res.writeHead(401, { 'content-type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ error: '未登录' }));
+    } else {
+      res.writeHead(303, { location: '/login' });
+      res.end();
+    }
+    return;
+  }
 
   if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
@@ -123,9 +186,16 @@ const server = http.createServer((req, res) => {
     });
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, BIND_HOST, () => {
   const mode = api.hasCredentials() ? '自动批改' : '手工批改（未检测到 API key）';
   console.log(`\n  true-english  ·  ${mode}`);
   console.log(`  http://localhost:${PORT}`);
-  console.log(`  数据库 ${DB_FILE}\n`);
+  console.log(`  数据库 ${DB_FILE}`);
+  if (AUTH_ON) {
+    console.log(`  鉴权 已开启，监听 ${BIND_HOST}`);
+  } else {
+    console.log(`  鉴权 未开启 —— 只监听 127.0.0.1，公网访问不到`);
+    console.log(`       要部署到公网，先设 TRUE_ENGLISH_TOKEN`);
+  }
+  console.log('');
 });

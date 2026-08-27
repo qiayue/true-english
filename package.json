@@ -15,16 +15,17 @@
     "demo": "tsx src/cli/demo.ts",
     "dev": "tsx src/server/index.ts",
     "seed:example": "bash scripts/seed-example.sh",
-    "shot": "node scripts/screenshot.mjs"
+    "shot": "node scripts/screenshot.mjs",
+    "start": "tsx src/server/index.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.121.0",
-    "zod": "^4.0.0"
+    "zod": "^4.0.0",
+    "tsx": "^4.19.2"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
     "playwright": "^1.62.1",
-    "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   }
 }
