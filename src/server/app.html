@@ -44,6 +44,10 @@ textarea,input{width:100%;font-family:var(--mono);font-size:.86rem;line-height:1
   background:var(--surface);color:var(--ink);border:1px solid var(--rule);border-radius:3px;
   padding:.7rem .8rem;resize:vertical}
 textarea:focus,input:focus{outline:2px solid var(--qing);outline-offset:-1px;border-color:transparent}
+/* 键盘导航必须看得见焦点，否则用 Tab 走的人完全不知道自己在哪 */
+button:focus-visible,label:focus-visible,[tabindex]:focus-visible{
+  outline:2px solid var(--qing);outline-offset:2px;border-radius:3px}
+button:disabled{cursor:progress}
 button.act{font-family:inherit;font-size:.88rem;padding:.45rem 1rem;border-radius:3px;cursor:pointer;
   background:var(--ink);color:var(--paper);border:1px solid var(--ink)}
 button.act:hover{opacity:.85}
@@ -358,6 +362,35 @@ LLM_MODEL=anthropic/claude-sonnet-4.5</pre>
 </div>
 
 <script type="module">
+/**
+ * 所有 onclick 自动防重。
+ *
+ * 在赋值处统一拦，而不是逐个 handler 加 disabled ——
+ * 逐个加的话，以后每新增一个按钮都得记得加，迟早会漏。
+ * 这里拦一次，之后所有 handler（包括动态生成的）都自动带上。
+ *
+ * 为什么必须防：自动批改模式下双击「提交批改」会发两次 LLM 请求，
+ * 花两份钱；双击「导入卡片」会建两份重复数据。
+ */
+{
+  const desc = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'onclick');
+  Object.defineProperty(HTMLElement.prototype, 'onclick', {
+    configurable: true,
+    get() { return desc.get.call(this); },
+    set(fn) {
+      if (typeof fn !== 'function') return desc.set.call(this, fn);
+      desc.set.call(this, async function (...args) {
+        if (this.dataset.busy) return;          // 上一次还没跑完
+        this.dataset.busy = '1';
+        const wasDisabled = this.disabled;
+        this.disabled = true;
+        try { return await fn.apply(this, args); }
+        finally { delete this.dataset.busy; this.disabled = wasDisabled; }
+      });
+    },
+  });
+}
+
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -371,12 +404,52 @@ async function call(url, body) {
   return data;
 }
 function showErr(el, e) { el.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+/**
+ * 复制到剪贴板 —— **必须如实报告结果**。
+ *
+ * 原来的实现不管成没成都显示「已复制 ✓」。这不是理论问题：
+ * 通过 Tailscale 用 http://100.x.x.x:5173 访问时是**非安全上下文**，
+ * navigator.clipboard 根本不存在，而 execCommand('copy') 会静默
+ * 返回 false 也不抛错。结果就是点了说成功、粘贴出来是空的 ——
+ * 而复制批改请求是手工模式下每天都要走的一步。
+ */
 async function copy(text, btn) {
-  try { await navigator.clipboard.writeText(text); }
-  catch { const t = document.createElement('textarea'); t.value = text; document.body.appendChild(t);
-          t.select(); document.execCommand('copy'); t.remove(); }
-  const old = btn.textContent; btn.textContent = '已复制 ✓';
-  setTimeout(() => { btn.textContent = old; }, 1400);
+  let ok = false;
+  try {
+    if (window.isSecureContext && navigator.clipboard) {
+      await navigator.clipboard.writeText(text);
+      ok = true;
+    }
+  } catch { ok = false; }
+  if (!ok) {
+    try {
+      const t = document.createElement('textarea');
+      t.value = text;
+      t.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+      document.body.appendChild(t);
+      t.select();
+      ok = document.execCommand('copy');
+      t.remove();
+    } catch { ok = false; }
+  }
+
+  const label = btn.dataset.label ?? btn.textContent;
+  btn.dataset.label = label;
+  btn.textContent = ok ? '已复制 ✓' : '复制不了，手动全选下面那段';
+  btn.style.color = ok ? '' : 'var(--zhu)';
+  if (!ok) {
+    // 复制不了就把内容选中，让用户一个 Ctrl+C 就能拿走
+    const pre = btn.closest('div')?.parentElement?.querySelector('pre.payload');
+    if (pre) {
+      const r = document.createRange();
+      r.selectNodeContents(pre);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(r);
+      pre.scrollIntoView({ block: 'nearest' });
+    }
+  }
+  setTimeout(() => { btn.textContent = label; btn.style.color = ''; }, ok ? 1400 : 4000);
 }
 
 let AUTO = false;

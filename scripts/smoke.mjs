@@ -23,6 +23,18 @@ function check(name, ok, detail = '') {
   if (!ok) failed++;
 }
 
+/**
+ * 点击覆盖率。
+ *
+ * 这个测试此前是**被动长出来的**：用户报一个 bug，我补一条断言。
+ * 于是它永远只覆盖「已经坏过」的路径，从不覆盖「即将坏」的 ——
+ * 照抄级的「再看一眼」点了没反应，就是这么漏出去的。
+ *
+ * 现在反过来：从 HTML 里枚举全部按钮，跑完断言每一个都被点过。
+ * 点不到的必须在 EXEMPT 里写明理由，不能默默放过。
+ */
+const clicked = new Set();
+
 const TWEET =
   "We redesigned the Cloudflare Blog — dark mode, cleaner UI, faster load times. " +
   "What you might not know: the whole thing runs on EmDash, a new CMS built on Cloudflare Workers. " +
@@ -43,7 +55,19 @@ await post('/api/cards/import', { texts: [TWEET], json: fs.readFileSync('/tmp/cf
   .catch(() => {});
 
 const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
-const p = await b.newPage({ viewport: { width: 820, height: 1000 } });
+const ctx = await b.newContext({
+  viewport: { width: 820, height: 1000 },
+  permissions: ['clipboard-read', 'clipboard-write'],
+});
+const p = await ctx.newPage();
+
+// 包一层，记录点过哪些按钮
+const rawClick = p.click.bind(p);
+p.click = async (sel, ...rest) => {
+  const m = /#(btn-[\w-]+)/.exec(sel);
+  if (m) clicked.add(m[1]);
+  return rawClick(sel, ...rest);
+};
 const errors = [];
 p.on('pageerror', (e) => errors.push(e.message));
 p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
@@ -61,8 +85,23 @@ const hint = await p.textContent('#ingest-hint');
 check('投料筛选', hint.includes('1/2'), hint);
 check('清掉了界面噪音', hint.includes('界面噪音'), hint);
 check('通过的可勾选', (await p.locator('#raw ~ * .pick, #ingest-out .pick').count()) === 1);
-check('导出卡片请求', await p.click('#btn-card-manual').then(() => p.waitForTimeout(400))
-  .then(async () => (await p.textContent('#card-payload')).length > 100));
+await p.click('#btn-card-manual'); await p.waitForTimeout(400);
+check('导出卡片请求', (await p.textContent('#card-payload')).length > 100);
+
+// 复制按钮：确认真的写进了剪贴板，不是只换个文案
+await p.click('#btn-copy-card'); await p.waitForTimeout(400);
+const clipCard = await p.evaluate(() => navigator.clipboard.readText());
+check('复制请求写进剪贴板', clipCard.length > 1000 && clipCard.includes('JSON 数组'),
+  `${clipCard.length} 字`);
+check('复制后按钮给了反馈', (await p.textContent('#btn-copy-card')).includes('已复制'),
+  await p.textContent('#btn-copy-card'));
+
+// ★ 从浏览器真正走一遍导入 —— 手工模式下这是每天的必经之路，
+// 此前只在 API 层测过，界面这一段从没跑通过
+await p.fill('#card-json', fs.readFileSync('/tmp/cf-card.json', 'utf8'));
+await p.click('#btn-import-card'); await p.waitForTimeout(900);
+const cardMsg = await p.textContent('#card-msg');
+check('★ 界面上导入卡片能成功', cardMsg.includes('已导入'), cardMsg.slice(0, 60));
 
 // ── 今日队列 ──
 await p.click('nav button[data-tab="practice"]'); await p.waitForTimeout(700);
@@ -107,6 +146,22 @@ await p.keyboard.press('Enter'); await p.waitForTimeout(500);
 check('照抄打对了判过', (await p.textContent('#btn-step-primary')).includes('下一步'),
   await p.textContent('#btn-step-primary'));
 
+// ── 提示阶梯：三级，且短句时不能泄底 ──
+await p.click('#btn-mode-toggle'); await p.waitForTimeout(200);
+await p.click('#mode-switch button[data-stage="step"]'); await p.waitForTimeout(600);
+await p.locator('#step-input').waitFor({ state: 'visible', timeout: 10_000 });
+await p.click('#btn-step-hint'); await p.waitForTimeout(500);
+const h1 = await p.textContent('#step-out');
+check('提示一级给骨架不给答案', h1.includes('骨架提示') && !h1.includes(STEP_ANSWERS[0]), h1.slice(0, 40));
+await p.click('#btn-step-hint'); await p.waitForTimeout(500);
+check('提示二级给词块或结构提示',
+  /关键词块|没有能给的词块/.test(await p.textContent('#step-out')),
+  (await p.textContent('#step-out')).slice(0, 40));
+await p.click('#btn-step-hint'); await p.waitForTimeout(500);
+check('提示三级才揭晓原文', (await p.textContent('#step-out')).includes(STEP_ANSWERS[0]));
+await p.click('#btn-mode-toggle'); await p.waitForTimeout(200);
+await p.click('#mode-switch button[data-stage="copy"]'); await p.waitForTimeout(600);
+
 // ── 填空级：按漏点挖空，且不下发答案 ──
 await p.click('#btn-mode-toggle'); await p.waitForTimeout(200);
 await p.click('#mode-switch button[data-stage="cloze"]'); await p.waitForTimeout(700);
@@ -143,6 +198,10 @@ await p.fill('#attempt', 'Wr redesigned Cloudflare blog, dark mode, cleaner ui, 
 await p.click('#btn-submit'); await p.waitForTimeout(700);
 check('提交批改有反应', await p.isVisible('#grade-manual'), '手工模式应弹出导出请求');
 check('批改请求有内容', (await p.textContent('#grade-payload')).length > 500);
+await p.click('#btn-copy-grade'); await p.waitForTimeout(400);
+const clipGrade = await p.evaluate(() => navigator.clipboard.readText());
+check('批改请求能复制', clipGrade.length > 1000 && clipGrade.includes('回译'),
+  `${clipGrade.length} 字`);
 
 await p.fill('#grade-json', JSON.stringify({
   items: [{ mine: 'Wr', native: 'We', category: 'leak', verdict: 'wrong', leak: 'wordform',
@@ -202,6 +261,25 @@ const rep = await p.textContent('#report-out');
 check('报告有数据', rep.includes('回译') && rep.includes('错误模式'), rep.slice(0, 60));
 
 check('没有 JS 运行时错误', errors.length === 0, errors.join(' | ').slice(0, 200));
+
+// ── 点击覆盖率 ──
+// 点不到的必须写明理由。留空 = 有个按钮没人测过，那就是下一个事故。
+const EXEMPT = {
+  'btn-card-auto': '自动生成卡片需要配好 LLM，冒烟跑在手工模式下',
+  'btn-fetch-models': '拉模型列表要连真实端点，出口代理挡着',
+  'btn-test-settings': '同上，要连真实端点',
+  'btn-clear-key': '会清掉配置，跑在共享库上有副作用',
+  'btn-save-settings': '会写配置，跑在共享库上有副作用',
+  'btn-step-copy': '要连错三次才出现，另有 tests 覆盖分支逻辑',
+  'btn-del-x': '动态生成，另行断言',
+  'btn-step-accept': '与 btn-step-peek 互斥分支，逻辑同源',
+  'btn-next-card': '存档成功后才出现，已断言其可见性',
+};
+const allButtons = [...fs.readFileSync('src/server/app.html', 'utf8')
+  .matchAll(/id="(btn-[\w-]+)"/g)].map((m) => m[1]);
+const uncovered = [...new Set(allButtons)].filter((id) => !clicked.has(id) && !EXEMPT[id]);
+check(`点击覆盖：${clicked.size}/${new Set(allButtons).size - Object.keys(EXEMPT).length} 个按钮被点过`,
+  uncovered.length === 0, uncovered.length ? `没测到：${uncovered.join(', ')}` : '');
 
 await b.close();
 
