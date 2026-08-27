@@ -165,6 +165,7 @@ pre.payload{background:var(--surface);border:1px solid var(--rule);border-radius
 <nav>
   <button data-tab="ingest" class="sel">投料</button>
   <button data-tab="practice">练习</button>
+  <button data-tab="compose">写作</button>
   <button data-tab="corpus">语料库</button>
   <button data-tab="report">报告</button>
   <button data-tab="settings">设置</button>
@@ -272,6 +273,7 @@ pre.payload{background:var(--surface);border:1px solid var(--rule);border-radius
       </div>
       <div class="row">
         <button class="act" id="btn-submit">提交批改</button>
+        <span class="faint mono" style="font-size:.72rem">⌘/Ctrl + Enter</span>
         <span class="faint mono" id="submit-hint"></span>
       </div>
     </div>
@@ -288,6 +290,10 @@ pre.payload{background:var(--surface);border:1px solid var(--rule);border-radius
     </div>
 
     <div id="result"></div>
+    <!-- 写作台被搬进来的位置。刻意放在 #result **外面** ——
+         #result 到处都在被 innerHTML 整体重写，写作台要是待在里面，
+         随便哪次重绘都会把它连人带输入内容一起抹掉。 -->
+    <div id="desk-slot" class="hidden" style="margin-top:1.1rem"></div>
   </div>
 </section>
 
@@ -336,20 +342,62 @@ LLM_MODEL=anthropic/claude-sonnet-4.5</pre>
   </div>
 </section>
 
+<!-- ─────────── 写作 ───────────
+     这个面板是整个项目的**目的**。回译、支架、间隔重复全都是手段，
+     手段那一侧原来有一整套机器，目的这一侧只有一个输入框加一个子串计数器。
+     M9 就是来补这个的。
+
+     写作台（#desk）在整个应用里**只有一份**，它会被搬到你正在写的地方去 ——
+     练完一张卡就出现在批改结果下面，切到这个标签页就回到这里。
+     复制一份摆在两处的话，两份迟早会各自漂移，那正是之前两次事故的成因。
+-->
+<section class="panel" id="p-compose">
+  <h2>写作台</h2>
+  <p>回译是手段，<strong>这里才是目的</strong>。写一件你自己的事 —— 不是造句，是真的想说的话。</p>
+
+  <div id="desk-home">
+  <div id="desk" style="display:flex;flex-direction:column;gap:.8rem">
+    <div id="desk-ctx"></div>
+    <div id="desk-due"></div>
+    <div>
+      <textarea id="compose" rows="3" placeholder="写一条你自己的推文，说一件你自己的事"></textarea>
+      <div class="row" style="margin-top:.55rem">
+        <button class="act" id="btn-compose-grade">批改这一条</button>
+        <span class="faint mono" style="font-size:.72rem">⌘/Ctrl + Enter</span>
+        <button class="act ghost" id="btn-compose">只存档，不批改</button>
+        <label class="chk" style="margin-top:0"><input type="checkbox" id="posted"> 已经发出去了</label>
+        <span class="mono" id="reuse-live" style="font-size:.8rem;margin-left:auto"></span>
+      </div>
+    </div>
+
+    <div id="compose-manual" class="hidden">
+      <p class="hint">没配 LLM，走手工批改：把下面这段发给任意一个 Claude 会话，把返回的 JSON 贴回来。</p>
+      <div class="row" style="margin:.4rem 0"><button class="link" id="btn-copy-compose">复制批改请求</button></div>
+      <pre class="payload" id="compose-payload"></pre>
+      <textarea id="compose-json" rows="3" style="margin-top:.5rem" placeholder="把批改返回的 JSON 贴在这里"></textarea>
+      <div class="row" style="margin-top:.45rem"><button class="act" id="btn-import-compose">导入批改</button></div>
+    </div>
+
+    <div id="compose-out"></div>
+  </div>
+  </div>
+
+  <div class="seam"></div>
+  <div>
+    <div class="row" style="justify-content:space-between">
+      <h2>写过的</h2>
+      <button class="link" id="btn-load-history">刷新</button>
+    </div>
+    <p>写过的东西要能翻回来看。看不见自己三周前写的那条，就感觉不到自己在变。</p>
+    <div id="history-out" class="list" style="margin-top:.7rem"></div>
+  </div>
+</section>
+
 <!-- ─────────── 语料库 ─────────── -->
 <section class="panel" id="p-corpus">
   <h2>语料库</h2>
   <p>按<strong>功能</strong>索引，不按话题。写作时你的检索请求是「我想礼貌地反对」，不是「找个科技词」。</p>
   <div class="row" id="fn-filter"></div>
-  <div>
-    <span class="faint mono" style="font-size:.68rem;letter-spacing:.1em">检查一条仿写复用了几个词块</span>
-    <textarea id="compose" rows="3" style="margin-top:.35rem" placeholder="写一条你自己的推文，用上今天的骨架和词块"></textarea>
-    <div class="row" style="margin-top:.5rem">
-      <button class="act" id="btn-compose">检查并存档</button>
-      <label class="faint" style="font-size:.85rem"><input type="checkbox" id="posted" style="width:auto"> 已经发出去了</label>
-    </div>
-    <div id="compose-out" style="margin-top:.6rem"></div>
-  </div>
   <div id="corpus-out" style="display:flex;flex-direction:column;gap:1rem"></div>
 </section>
 
@@ -404,6 +452,22 @@ async function call(url, body) {
   return data;
 }
 function showErr(el, e) { el.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+
+/**
+ * Ctrl/Cmd+Enter 提交。
+ *
+ * 这不是「锦上添花的快捷键」：回译和仿写这两个框是每天都要用的，
+ * 写完一句话必须把手从键盘挪到鼠标上，一天挪十几次。
+ * `isComposing` 必须判 —— 中文输入法选词时按 Enter 是确认候选词，
+ * 不判的话打中文备注会被当成提交。
+ */
+function submitOnCtrlEnter(inputSel, buttonSel) {
+  $(inputSel).addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || e.isComposing || !(e.ctrlKey || e.metaKey)) return;
+    e.preventDefault();
+    $(buttonSel).click();
+  });
+}
 /**
  * 复制到剪贴板 —— **必须如实报告结果**。
  *
@@ -461,7 +525,11 @@ const LEAK = { article:'冠词', tense:'时态', number:'单复数', preposition
 $$('nav button').forEach((b) => b.onclick = () => {
   $$('nav button').forEach((x) => x.classList.toggle('sel', x === b));
   $$('.panel').forEach((p) => p.classList.toggle('sel', p.id === 'p-' + b.dataset.tab));
-  if (b.dataset.tab === 'practice') loadCards();
+  // 整个应用只有一份写作台，它会在练习页和写作页之间来回搬。
+  // 离开练习页就收回来（否则写作页是空的），切回来再放回去。
+  if (b.dataset.tab !== 'practice') parkDesk();
+  if (b.dataset.tab === 'practice') { restoreDesk(); loadCards(); }
+  if (b.dataset.tab === 'compose') { void loadDeck(); void loadHistory(); }
   if (b.dataset.tab === 'corpus') loadCorpus();
   if (b.dataset.tab === 'report') loadReport();
   if (b.dataset.tab === 'settings') loadSettings();
@@ -646,6 +714,7 @@ async function openCard(id, wantStage) {
   $('#drill-level').textContent = 'L' + CARD.level;
   $('#attempt').value = '';
   $('#result').innerHTML = '';
+  homeDesk();   // 上一张卡的写作台收回去，别把上一条的输入带到这一张
   $('#grade-manual').classList.add('hidden');
   $('#grade-json').value = '';
   $('#submit-hint').textContent = AUTO ? '' : '手工批改模式';
@@ -897,8 +966,11 @@ $('#btn-step-hint').onclick = async () => {
 };
 
 $('#btn-back').onclick = () => {
+  homeDesk();
   $('#drill').classList.add('hidden'); $('#pick').classList.remove('hidden'); loadCards();
 };
+
+submitOnCtrlEnter('#attempt', '#btn-submit');
 
 $('#btn-submit').onclick = async () => {
   const res = $('#result'); const attempt = $('#attempt').value.trim();
@@ -926,6 +998,24 @@ $('#btn-import-grade').onclick = async () => {
   } catch (e) { showErr(res, e); }
 };
 
+/**
+ * 逐处对比的渲染。回译和仿写共用一份 —— 两边的条目结构本来就一样，
+ * 各写一份的话，改了配色只改一边这种事迟早发生。
+ *
+ * `nativeLabel` 是唯一的差别：回译比的是「原文」，仿写比的是「母语者版」。
+ */
+function diffHtml(items, nativeLabel) {
+  if (!items || !items.length) return '';
+  return '<div>' + items.map((it) => `<div class="diff ${esc(it.verdict)}">
+      <div class="hd"><span class="tag">${CATEGORY[it.category] ?? it.category}${it.leak ? ' · ' + (LEAK[it.leak] ?? it.leak) : ''}</span>
+        <span class="mono" style="font-size:.76rem">${VERDICT[it.verdict] ?? it.verdict}</span></div>
+      <div class="split"><span class="t">你</span><span class="mono zhu">${esc(it.mine)}</span></div>
+      <div class="split"><span class="t">${esc(nativeLabel)}</span><span class="mono qing">${esc(it.native)}</span></div>
+      <div class="ex">${esc(it.explainZh)}</div>
+      ${it.rule ? `<div class="rule">规则 · ${esc(it.rule)}</div>` : ''}
+    </div>`).join('') + '</div>';
+}
+
 function renderReview(d) {
   const r = d.review;
   const pct = r.overlap.total > 0 ? Math.round(r.overlap.matched / r.overlap.total * 100) : 0;
@@ -945,20 +1035,7 @@ function renderReview(d) {
     h += `<div class="mono" style="font-size:.82rem"><span class="faint">硬伤　</span>` +
       Object.entries(leaks).sort((a,b)=>b[1]-a[1]).map(([k,v]) => `<span class="zhu">${LEAK[k]??k} ×${v}</span>`).join('　') + `</div>`;
   }
-  if (r.items.length) {
-    h += '<div>';
-    r.items.forEach((it) => {
-      h += `<div class="diff ${esc(it.verdict)}">
-        <div class="hd"><span class="tag">${CATEGORY[it.category] ?? it.category}${it.leak ? ' · ' + (LEAK[it.leak] ?? it.leak) : ''}</span>
-          <span class="mono" style="font-size:.76rem">${VERDICT[it.verdict] ?? it.verdict}</span></div>
-        <div class="split"><span class="t">你</span><span class="mono zhu">${esc(it.mine)}</span></div>
-        <div class="split"><span class="t">原</span><span class="mono qing">${esc(it.native)}</span></div>
-        <div class="ex">${esc(it.explainZh)}</div>
-        ${it.rule ? `<div class="rule">规则 · ${esc(it.rule)}</div>` : ''}
-      </div>`;
-    });
-    h += '</div>';
-  }
+  h += diffHtml(r.items, '原');
   if (r.strengths?.length) {
     h += `<div class="ok"><strong>做对的地方</strong><br>` +
       r.strengths.map((s) => '· ' + esc(s)).join('<br>') + `</div>`;
@@ -981,8 +1058,6 @@ function renderReview(d) {
  * 不许『以后再用』」。所以它必须紧接在批改后面，不能扔在另一个标签页里。
  */
 function renderFinish(d) {
-  const frames = d.frames ?? [];
-  const chunks = d.chunks ?? [];
   const wrap = document.createElement('div');
   wrap.id = 'finish';
   wrap.style.cssText = 'display:flex;flex-direction:column;gap:1.1rem;margin-top:1.6rem';
@@ -994,73 +1069,41 @@ function renderFinish(d) {
       <div class="stepnum"><span>1</span>出声读三遍</div>
       <p style="margin:.35rem 0 .6rem">目标是写作，为什么要读出声？因为<strong>冠词和介词的错误，眼睛看不出来，耳朵能听出来</strong>。
         写作者的语感本质上是「能在脑子里听见这句话」—— 没有它，你永远无法自我校对。3 分钟，很便宜。</p>
-      <div class="card"><div class="mono qing" style="font-size:1rem;line-height:1.9">${esc(d.original)}</div></div>
+      <div class="card" id="read-aloud"><div class="mono qing" style="font-size:1rem;line-height:1.9">${esc(d.original)}</div></div>
       <label class="chk"><input type="checkbox" id="chk-read"> 读完三遍了</label>
     </div>
 
-    <div>
+    <div id="finish-write" class="hidden">
       <div class="stepnum"><span>2</span>现在轮到你了</div>
-      <p style="margin:.35rem 0 .7rem">今天的骨架不是拿来收藏的。<strong>用它说一件你自己的事</strong> ——
+      <p style="margin:.35rem 0 .2rem">今天的骨架不是拿来收藏的。<strong>用它说一件你自己的事</strong> ——
         当天不用，就永远不会用。不复用的语料库是坟场。</p>
-
-      ${frames.length ? `<div class="scaff"><span class="faint mono lbl">骨架 · 点一下填进去</span>${
-        frames.map((f) => `<button class="chip" data-ins="${esc(f.pattern)}">${esc(f.pattern)}
-          <em>${esc(f.fn)}</em></button>`).join('')}</div>` : ''}
-
-      ${chunks.length ? `<div class="scaff"><span class="faint mono lbl">词块 · 至少用上 2 个</span>${
-        chunks.map((c) => `<button class="chip qingchip" data-ins="${esc(c.text)}">${esc(c.text)}
-          <em>${esc(c.fn)}</em></button>`).join('')}</div>` : ''}
-
-      <textarea id="mine-tweet" rows="3" style="margin-top:.7rem"
-        placeholder="写一条你自己的推文，说一件你自己的事"></textarea>
-      <div class="row" style="margin-top:.55rem">
-        <button class="act" id="btn-archive">检查并存档</button>
-        <label class="chk"><input type="checkbox" id="chk-posted"> 已经发出去了</label>
-        <span class="mono" id="reuse-live" style="font-size:.8rem;margin-left:auto"></span>
-      </div>
-      <div id="archive-out" style="margin-top:.6rem"></div>
     </div>`;
 
   $('#result').appendChild(wrap);
+  // 写作台是同一份，搬过来（不是复制一份）。见 #p-compose 上方的注释。
+  deskToFinish(d);
 
-  wrap.querySelectorAll('.chip').forEach((b) => b.onclick = () => {
-    const t = $('#mine-tweet');
-    t.value = (t.value.trim() + ' ' + b.dataset.ins).trim();
-    t.focus(); liveReuse();
-  });
-
-  let timer;
-  const liveReuse = () => {
-    clearTimeout(timer);
-    timer = setTimeout(async () => {
-      const text = $('#mine-tweet').value.trim();
-      if (!text) { $('#reuse-live').textContent = ''; return; }
-      try {
-        const r = await call('/api/reuse', { text });
-        $('#reuse-live').innerHTML = r.ok
-          ? `<span class="qing">复用 ${r.hits.length} 个 ✓</span>`
-          : `<span class="faint">复用 ${r.hits.length} 个，还差 ${r.need}</span>`;
-      } catch { /* 实时反馈失败不打扰 */ }
-    }, 350);
+  /**
+   * 第二步先藏着，勾了「读完三遍」再放出来。
+   *
+   * 批改结果本身就有十几屏，后面再一口气堆上朗读、骨架、词块、
+   * 今天该用的、输入框 —— 一屏之内五件事同时喊你，人的反应是全都不做。
+   * 这和阶梯练习里「一次只给一件事」是同一条原则，只是之前没应用到收尾流程。
+   *
+   * 勾选之后把原文收起来（读都读完了，它只是在占地方），
+   * 然后把页面滚到输入框 —— 否则「放出来了」和「找得到」是两回事。
+   */
+  $('#chk-read').onchange = (e) => {
+    const on = e.target.checked;
+    $('#finish-write').classList.toggle('hidden', !on);
+    $('#desk-slot').classList.toggle('hidden', !on);
+    $('#read-aloud').classList.toggle('hidden', on);
+    if (on) {
+      $('#desk-slot').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setTimeout(() => $('#compose').focus(), 400);
+    }
   };
-  $('#mine-tweet').addEventListener('input', liveReuse);
-
-  $('#btn-archive').onclick = async () => {
-    const out = $('#archive-out');
-    try {
-      const r = await call('/api/compose', {
-        text: $('#mine-tweet').value, posted: $('#chk-posted').checked,
-      });
-      out.innerHTML = r.ok
-        ? `<div class="ok"><strong>存好了 · 复用了 ${r.hits.length} 个词块</strong><br>` +
-          r.hits.map((x) => `<span class="mono qing">${esc(x.text)}</span>`).join('　') +
-          `<div style="margin-top:.7rem"><button class="act" id="btn-next-card">这张过了，下一张 →</button></div></div>`
-        : `<div class="err">只复用了 ${r.hits.length} 个词块，还差 ${r.need} 个。<br>
-           <span class="faint">铁律：每条自己写的推文至少用 2 个。已经存下了，但这一条不算数。</span></div>`;
-      const nb = $('#btn-next-card');
-      if (nb) nb.onclick = () => $('#btn-back').click();
-    } catch (e) { showErr(out, e); }
-  };
+  $('#desk-slot').classList.add('hidden');
 }
 
 window.__render = renderReview;
@@ -1183,27 +1226,314 @@ async function loadCorpus() {
     out.innerHTML = h || '<p>还没有词块。做完一次批改就会自动入库。</p>';
   } catch (e) { showErr(out, e); }
 }
+// ── 写作台 ──
+//
+// 这是 M9 补上的那个环：
+//   推今天该用的词块 → 他写 → 批改判定哪些**真的用对了**
+//   → 更新词块熟悉度 → 明天推该用的给他
+//
+// 之前断在第二步：写完只有一个「复用了 N 个」的子串计数，
+// 而子串匹配到不等于用对了。系统于是永远不知道他哪个词块会用、哪个不会。
+
+let COMP_ID = null;      // 已经存过档的话挂到同一条上，不再重复存
+let DESK_CTX = null;     // 刚练完那张卡的骨架和词块
+let DESK_CARD = null;    // 刚练完那张卡的 id —— 它的词块已经钉在上面，别在队列里再列一遍
+
+let DESK_PARKED = false;  // 它本来在批改结果下面，只是因为切了标签页暂时收回来
+
+/**
+ * 切标签页时把写作台收回它自己的页面。
+ *
+ * 「收回」和「收摊」是两件事，必须分开：切页只是暂时挪走，
+ * 切回练习页时它得回到批改结果下面 —— 否则你去查了一眼语料库再回来，
+ * 收尾流程的第二步就凭空少了一个输入框，而你刚才正在那里写东西。
+ */
+function parkDesk() {
+  const desk = $('#desk');
+  if (!desk) return;
+  DESK_PARKED = desk.parentElement === $('#desk-slot');
+  $('#desk-home').appendChild(desk);
+  $('#desk-slot').classList.add('hidden');
+}
+
+/**
+ * 切回练习页：本来在批改结果下面的，搬回去。
+ *
+ * 但要尊重「还没勾读完三遍」这个状态 —— 出去转一圈回来，
+ * 第二步不该自己冒出来。
+ */
+function restoreDesk() {
+  if (!DESK_PARKED || !$('#finish')) return;
+  $('#desk-slot').appendChild($('#desk'));
+  const opened = $('#finish-write') && !$('#finish-write').classList.contains('hidden');
+  $('#desk-slot').classList.toggle('hidden', !opened);
+}
+
+/** 收摊：换卡片、换一张时用。连上一张卡的骨架词块一起清掉。 */
+function homeDesk() {
+  DESK_PARKED = false;
+  const desk = $('#desk');
+  if (desk && desk.parentElement !== $('#desk-home')) $('#desk-home').appendChild(desk);
+  $('#desk-slot').classList.add('hidden');
+  $('#desk-ctx').innerHTML = '';
+  DESK_CTX = null;
+  DESK_CARD = null;
+}
+
+/** 把写作台搬到批改结果下面 —— 方法论要求当天就用上今天的材料 */
+function deskToFinish(d) {
+  DESK_CTX = { frames: d.frames ?? [], chunks: d.chunks ?? [] };
+  DESK_CARD = d.cardId ?? null;
+  const ctx = $('#desk-ctx');
+  ctx.innerHTML =
+    (DESK_CTX.frames.length ? `<div class="scaff"><span class="faint mono lbl">今天这条的骨架 · 点一下填进去</span>` +
+      DESK_CTX.frames.map((f) => `<button class="chip" data-ins="${esc(f.pattern)}">${esc(f.pattern)}
+        <em>${esc(f.fn)}</em></button>`).join('') + '</div>' : '') +
+    (DESK_CTX.chunks.length ? `<div class="scaff"><span class="faint mono lbl">今天这条的词块</span>` +
+      DESK_CTX.chunks.map((c) => `<button class="chip qingchip" data-ins="${esc(c.text)}">${esc(c.text)}
+        <em>${esc(c.fn)}</em></button>`).join('') + '</div>' : '');
+  bindChips(ctx);
+  DESK_PARKED = true;
+  $('#desk-slot').classList.remove('hidden');
+  $('#desk-slot').appendChild($('#desk'));
+  void loadDeck(DESK_CARD);
+}
+
+function bindChips(root) {
+  root.querySelectorAll('.chip').forEach((b) => b.onclick = () => {
+    const t = $('#compose');
+    t.value = (t.value.trim() + ' ' + b.dataset.ins).trim();
+    t.focus(); liveReuse();
+  });
+}
+
+/**
+ * 「今天试着用这三个」。
+ *
+ * 只给 3 个是刻意的。语料库里几十个词块摆成一张列表，人是不会翻的；
+ * 3 个摆在输入框正上方，才会用。给多了就变成待办清单 ——
+ * 清单是用来焦虑的，不是用来写作的，而且一条推文硬塞 8 个词块
+ * 也不叫写作，叫造句。
+ */
+async function loadDeck(notCardId) {
+  const box = $('#desk-due');
+  try {
+    const d = await call('/api/compose/deck' + (notCardId ? '?not=' + encodeURIComponent(notCardId) : ''));
+    if (!d.chunks.length) {
+      box.innerHTML = d.stats.total
+        ? `<p class="hint">${notCardId ? '今天这条的词块就在上面，先用它们。' : '词块都在复习间隔里，今天没有非用不可的。随便写。'}</p>`
+        : '<p class="hint">语料库还是空的 —— 先去练一张卡，批改完词块就自动入库了。</p>';
+      return;
+    }
+    // 一行一个。用错过的才展开原推例句 —— 那一句就是纠正本身，
+    // 其他的展开只是把输入框往下推。
+    box.innerHTML = `<div><span class="faint mono lbl" style="font-size:.68rem;letter-spacing:.1em">${
+        notCardId ? '顺便捡回这几个' : '今天试着用这几个'} · 点一下填进去</span>
+      <div class="list" style="margin-top:.35rem">` +
+      d.chunks.map((c) => `<button class="item" data-ins="${esc(c.text)}">
+        <span class="mk ${c.misuses > 0 ? 'zhu' : 'qing'}">${c.misuses > 0 ? '✗' : c.box === null ? '新' : '↺'}</span>
+        <span><span class="mono qing">${esc(c.text)}</span>
+          <span class="faint" style="font-size:.84rem">　${esc(c.gloss_zh)}　·　${esc(c.why)}</span>
+          ${c.misuses > 0 ? `<br><span class="mono faint" style="font-size:.76rem">原推：${esc(c.example)}</span>` : ''}</span>
+      </button>`).join('') + `</div>
+      <p class="hint">库里 ${d.stats.total} 个，用对过 ${d.stats.verified} 个 —— <b>没被用过的词块等于没学过</b>。</p></div>`;
+    box.querySelectorAll('.item').forEach((b) => b.onclick = () => {
+      const t = $('#compose');
+      t.value = (t.value.trim() + ' ' + b.dataset.ins).trim();
+      t.focus(); liveReuse();
+    });
+  } catch (e) { showErr(box, e); }
+}
+
+let REUSE_TIMER = null;
+function liveReuse() {
+  clearTimeout(REUSE_TIMER);
+  REUSE_TIMER = setTimeout(async () => {
+    const text = $('#compose').value.trim();
+    if (!text) { $('#reuse-live').textContent = ''; return; }
+    try {
+      const r = await call('/api/reuse', { text });
+      // 措辞刻意保守：这里只是字符串匹配到了，不代表用对了。
+      // 说成「复用了 3 个 ✓」会让人以为已经过关，而真正的判定在批改里。
+      $('#reuse-live').innerHTML = r.hits.length
+        ? `<span class="faint">碰到 ${r.hits.length} 个词块${r.ok ? '' : `，还差 ${r.need}`}</span>`
+        : '<span class="faint">还没碰到库里的词块</span>';
+    } catch { /* 实时反馈失败不打扰 */ }
+  }, 350);
+}
+$('#compose').addEventListener('input', liveReuse);
+submitOnCtrlEnter('#compose', '#btn-compose-grade');
+
+/** 存档但不批改。不动词块进度 —— 匹配到 ≠ 用对了，详见 api.compose 的注释。 */
 $('#btn-compose').onclick = async () => {
   const out = $('#compose-out');
   try {
-    const r = await call('/api/compose', { text: $('#compose').value, posted: $('#posted').checked });
-    out.innerHTML = r.ok
-      ? `<div class="ok">复用了 ${r.hits.length} 个词块 ✓<br>` +
-        r.hits.map((h) => `<span class="mono qing">${esc(h.text)}</span>`).join('　') + '</div>'
-      : `<div class="err">只复用了 ${r.hits.length} 个词块，还差 ${r.need} 个。<br>` +
-        `<span class="faint">铁律：每条自己写的推文至少用 2 个。不复用的语料库是坟场。</span></div>`;
+    const r = await call('/api/compose', {
+      text: $('#compose').value, posted: $('#posted').checked, compId: COMP_ID,
+    });
+    COMP_ID = r.compId;
+    out.innerHTML = `<div class="ok">存下了。碰到 ${r.hits.length} 个词块，但<strong>没有批改就不算数</strong> ——
+      系统无法判断你是用对了还是用错了，所以这一条不会改变任何词块的熟悉度。
+      <br><span class="faint">想让它算数，点上面的「批改这一条」。</span></div>`;
   } catch (e) { showErr(out, e); }
 };
+
+$('#btn-compose-grade').onclick = async () => {
+  const out = $('#compose-out');
+  const text = $('#compose').value.trim();
+  if (!text) { out.innerHTML = '<div class="err">先写点什么。</div>'; return; }
+  try {
+    if (AUTO) {
+      out.innerHTML = '<p>批改中…</p>';
+      renderCompose(await call('/api/compose/review', { text, posted: $('#posted').checked, compId: COMP_ID }));
+    } else {
+      const r = await call('/api/compose/grade-request', { text });
+      $('#compose-payload').textContent = r.payload;
+      $('#compose-manual').classList.remove('hidden');
+      out.innerHTML = '';
+      $('#compose-payload').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  } catch (e) { showErr(out, e); }
+};
+
+$('#btn-copy-compose').onclick = (e) => copy($('#compose-payload').textContent, e.target);
+
+$('#btn-import-compose').onclick = async () => {
+  const out = $('#compose-out');
+  try {
+    renderCompose(await call('/api/compose/import', {
+      text: $('#compose').value, posted: $('#posted').checked,
+      json: $('#compose-json').value, compId: COMP_ID,
+    }));
+    $('#compose-manual').classList.add('hidden');
+    $('#compose-json').value = '';
+  } catch (e) { showErr(out, e); }
+};
+
+const CLARITY = {
+  clear: ['读懂了', '母语者一遍就懂', 'qing'],
+  fuzzy: ['要停顿一下', '能猜出来，但读者得回头再读一遍', ''],
+  unclear: ['没读懂', '母语者看不出你想说什么', 'zhu'],
+};
+
+/**
+ * 渲染仿写批改。
+ *
+ * 顺序是刻意的：**先母语者版，再清晰度，最后才是逐处对比**。
+ *
+ * 母语者版排第一，因为它是这次练习最值钱的东西 —— 那是「你想说的这句话，
+ * native 会怎么说」，比任何现成教材都贴身。清晰度排第二，因为写作的
+ * 第一目标是被读懂：一句语法完美但意思含混的话，不如一句带小错但清楚的。
+ * 语法细节排最后。
+ */
+function renderCompose(d) {
+  const r = d.review;
+  const [zh, note, cls] = CLARITY[r.clarity] ?? CLARITY.clear;
+  COMP_ID = d.compId;
+
+  let h = '<div style="display:flex;flex-direction:column;gap:1.1rem;margin-top:.6rem">';
+
+  h += `<div class="card">
+    <div class="split"><span class="t">你写的</span><span class="mono zhu">${esc($('#compose').value.trim())}</span></div>
+    <div class="split"><span class="t">母语者</span><span class="mono qing">${esc(r.nativeVersion)}</span></div>
+    <div class="row" style="justify-content:flex-end"><button class="link" id="btn-copy-native">复制母语者版</button></div>
+  </div>`;
+
+  h += `<div class="row" style="gap:.5rem">
+    <span class="faint mono" style="font-size:.7rem;letter-spacing:.1em">读懂了吗</span>
+    <span class="mono ${cls}"><b>${zh}</b></span>
+    <span class="faint" style="font-size:.85rem">${esc(r.clarityZh || note)}</span>
+  </div>`;
+
+  // 词块：用对了的 vs 伸手去用但用错了的。后者才是这次最该看的东西 ——
+  // 他以为自己会。
+  if (d.used?.length || d.misused?.length) {
+    h += '<div>';
+    if (d.used.length) {
+      h += `<div class="ok"><strong>用对了 ${d.used.length} 个</strong><br>` +
+        d.used.map((t) => `<span class="mono qing">${esc(t)}</span>`).join('　') +
+        `<br><span class="faint" style="font-size:.82rem">这几个的复习间隔往后推了一格。</span></div>`;
+    }
+    if (d.misused.length) {
+      h += `<div class="card" style="border-left:3px solid var(--zhu);margin-top:.6rem">
+        <strong>伸手去用了，但用错了 ${d.misused.length} 个</strong>
+        <span class="faint" style="font-size:.85rem">这比没用过更值得看 —— 说明你以为自己会。已经打回重来，明天还会推给你。</span>` +
+        d.misused.map((c) => `<div class="split" style="margin-top:.35rem">
+          <span class="t">原推</span>
+          <span><span class="mono zhu">${esc(c.text)}</span> <span class="faint">${esc(c.glossZh)}</span>
+          <br><span class="mono faint" style="font-size:.78rem">${esc(c.example)}</span></span></div>`).join('') +
+        '</div>';
+    }
+    h += '</div>';
+  }
+
+  h += diffHtml(r.items, '母语者');
+
+  if (r.strengths?.length) {
+    h += `<div class="ok"><strong>做对的地方</strong><br>` +
+      r.strengths.map((x) => '· ' + esc(x)).join('<br>') + '</div>';
+  }
+  if (r.verdictZh) h += `<p style="color:var(--ink)"><strong>总评</strong>　${esc(r.verdictZh)}</p>`;
+
+  if (d.next?.length) {
+    h += `<div class="seam"></div><div><span class="faint mono" style="font-size:.68rem;letter-spacing:.1em">${
+      d.used?.length ? '下次试着用这几个' : '这几个你今天还是没用上，明天还会推给你'}</span>
+      <div class="row" style="margin-top:.35rem">` +
+      d.next.map((c) => `<span class="chip qingchip">${esc(c.text)}<em>${esc(c.fn)}</em></span>`).join('') +
+      '</div></div>';
+  }
+
+  h += `<div class="row"><button class="act ghost" id="btn-compose-again">再写一条 →</button></div>`;
+  h += '</div>';
+
+  $('#compose-out').innerHTML = h;
+  $('#btn-copy-native').onclick = (e) => copy(r.nativeVersion, e.target);
+  $('#btn-compose-again').onclick = () => {
+    COMP_ID = null;
+    $('#compose').value = '';
+    $('#compose-out').innerHTML = '';
+    $('#reuse-live').textContent = '';
+    $('#compose').focus();
+    void loadDeck(DESK_CARD);
+  };
+  void loadDeck(DESK_CARD);
+}
+
+async function loadHistory() {
+  const out = $('#history-out');
+  try {
+    const d = await call('/api/compose/history');
+    if (!d.items.length) { out.innerHTML = '<p>还没写过。上面那个框就是起点。</p>'; return; }
+    out.innerHTML = d.items.map((c) => {
+      const cl = c.review ? (CLARITY[c.review.clarity] ?? CLARITY.clear) : null;
+      return `<div class="card">
+        <div class="row" style="justify-content:space-between">
+          <span class="faint mono" style="font-size:.7rem">${esc(c.createdAt.slice(0, 10))}${c.posted ? ' · 已发布' : ''}</span>
+          ${cl ? `<span class="mono ${cl[2]}" style="font-size:.76rem">${cl[0]}</span>`
+               : '<span class="faint mono" style="font-size:.72rem">没批改</span>'}
+        </div>
+        <div class="mono zhu">${esc(c.text)}</div>
+        ${c.review ? `<div class="mono qing" style="border-top:1px dashed var(--rule);padding-top:.45rem">${esc(c.review.nativeVersion)}</div>
+          ${c.review.chunkUse.length ? `<div class="faint" style="font-size:.8rem">用对了：${
+            c.review.chunkUse.map((x) => esc(x)).join('、')}</div>` : ''}` : ''}
+      </div>`;
+    }).join('');
+  } catch (e) { showErr(out, e); }
+}
+$('#btn-load-history').onclick = () => loadHistory();
 
 // ── 报告 ──
 async function loadReport() {
   const out = $('#report-out');
   try {
     const p = await call('/api/progress');
-    if (!p.attempts) { out.innerHTML = '<p>还没有数据。先做几次回译。</p>'; return; }
+    if (!p.attempts && !p.compositions) {
+      out.innerHTML = '<p>还没有数据。先做几次回译，或者去写作台写一条。</p>'; return;
+    }
     let h = `<div class="stat">
       <span><b>${p.attempts}</b> <span class="faint">次回译</span></span>
-      <span><b>${p.compositions}</b> <span class="faint">条仿写</span></span></div>`;
+      <span><b>${p.compositions}</b> <span class="faint">条仿写</span>${
+        p.composeReviews < p.compositions ? `<span class="faint mono" style="font-size:.72rem">（${p.composeReviews} 条批改过）</span>` : ''}</span></div>`;
 
     if (p.overlapTrend.length) {
       const v = p.overlapTrend.map((t) => t.pct);
@@ -1227,8 +1557,11 @@ async function loadReport() {
             <span><strong>${i + 1}. ${LEAK[l.leak] ?? l.leak}</strong> <span class="faint">${l.count} 次</span></span>
             <span class="mono zhu">${Math.round(l.share * 100)}%</span></div>
           <div class="bar" style="margin:.3rem 0 .4rem"><i style="width:${Math.round(l.share*100)}%;background:var(--zhu)"></i></div>
+          ${l.free ? `<p style="margin:-.15rem 0 .35rem"><span class="zhu mono" style="font-size:.78rem">其中 ${l.free} 次是自己写句子时犯的</span>
+            —— 回译时漏掉可能只是没记住原文，自己写时漏掉才是真的没掌握。</p>` : ''}
           ${l.samples.slice(0,3).map((s) => `<div class="mono" style="font-size:.8rem">
-            <span class="zhu">${esc(s.mine)}</span> <span class="faint">→</span> <span class="qing">${esc(s.native)}</span></div>`).join('')}
+            ${s.free ? '<span class="tag">自由写作</span> ' : ''}<span class="zhu">${esc(s.mine)}</span>
+            <span class="faint">→</span> <span class="qing">${esc(s.native)}</span></div>`).join('')}
         </div>`).join('') + '</div>';
     }
 
@@ -1240,9 +1573,41 @@ async function loadReport() {
         (tot > 12 && eq === 0 ? `<div class="err" style="margin-top:.5rem">一条 equal 都没有 —— 批改器可能在把「不同」误判成「错」。</div>` : '') + '</div>';
     }
 
-    if (p.compositions) {
-      const pc = Math.round(p.reuseRate * 100);
-      h += `<div><h2>词块复用率</h2><p style="margin-top:.3rem"><span class="mono"><b>${pc}%</b></span> 的仿写用上了 ≥2 个库里的词块</p></div>`;
+    // 语料库到底有没有在起作用 —— 这是全篇最该看的一个数字。
+    // 「复用率 60%」听着不错，但它只统计了字符串匹配到；
+    // 真正的问题是：库里几十个词块，有多少个你**真的用对过**。
+    if (p.chunks.total) {
+      const c = p.chunks;
+      const pc = (n) => Math.round(n / c.total * 100);
+      h += `<div><h2>语料库有没有在起作用</h2>
+        <div class="stat" style="margin-top:.5rem">
+          <span><b>${c.total}</b> <span class="faint">个词块</span></span>
+          <span><b class="qing">${c.verified}</b> <span class="faint">个用对过</span></span>
+          <span><b class="zhu">${c.total - c.used}</b> <span class="faint">个从没用过</span></span>
+        </div>
+        <div class="bar" style="margin:.5rem 0 .4rem"><i style="width:${pc(c.verified)}%"></i></div>
+        <p>${c.verified === 0
+          ? '一个都还没被批改确认用对过。<strong>没被用过的词块等于没学过</strong> —— 去写作台写一条，用上两个。'
+          : `真实掌握率 <span class="mono qing">${pc(c.verified)}%</span>。`}
+          ${c.misused ? `其中 <span class="zhu">${c.misused}</span> 个用错过 —— 这几个最该盯。` : ''}
+          ${c.due ? `今天有 ${c.due} 个该用一用。` : ''}</p></div>`;
+    }
+
+    if (p.composeReviews) {
+      const cl = p.clarity;
+      const tot = cl.clear + cl.fuzzy + cl.unclear;
+      h += `<div><h2>写出来的东西，别人读懂了吗</h2>
+        <p style="margin-top:.3rem">这一项比语法重要：一句语法完美但意思含混的话，不如一句带小错但清楚的。</p>
+        <div class="stat" style="margin-top:.45rem">
+          <span><b class="qing">${cl.clear}</b> <span class="faint">一遍读懂</span></span>
+          <span><b>${cl.fuzzy}</b> <span class="faint">要停顿</span></span>
+          <span><b class="zhu">${cl.unclear}</b> <span class="faint">没读懂</span></span>
+        </div>
+        ${tot > 0 ? `<div class="bar" style="margin-top:.45rem"><i style="width:${Math.round(cl.clear / tot * 100)}%"></i></div>` : ''}
+        </div>`;
+    } else if (p.compositions) {
+      h += `<div class="err">写了 ${p.compositions} 条，但一条都没批改过 —— 没有批改的仿写只是存档，
+        系统既判不出你用词块用对没有，也看不出别人能不能读懂。去写作台点「批改这一条」。</div>`;
     }
 
     if (p.topRules.length) {

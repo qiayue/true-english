@@ -55,12 +55,22 @@ export function estimateMinutes(stage: Stage, steps: number): number {
   return Math.max(0.5, COST_PER_STEP[stage] * n);
 }
 
-/** 学习者的漏点，按出现次数从高到低 */
+/**
+ * 学习者的漏点，按严重程度从高到低。填空级挖哪些空、排程给哪张卡加权，
+ * 都以此为准。
+ *
+ * **自由写作里犯的错按双倍计。** 回译时漏了个冠词，可能只是没记住原文
+ * 那个位置有没有 the；自己写句子时漏冠词，才说明这条规则根本没进脑子。
+ * 后者是真实写作水平，是这个项目的目标，权重理应更高。
+ */
 export function weakLeaks(db: DatabaseSync, limit = 4): Leak[] {
   const rows = db
     .prepare(
-      `SELECT leak, COUNT(*) AS n FROM diff_items
-       WHERE leak IS NOT NULL GROUP BY leak ORDER BY n DESC LIMIT ?`,
+      `SELECT leak, SUM(n) AS n FROM (
+         SELECT leak, COUNT(*) AS n FROM diff_items WHERE leak IS NOT NULL GROUP BY leak
+         UNION ALL
+         SELECT leak, COUNT(*) * 2 AS n FROM comp_diff_items WHERE leak IS NOT NULL GROUP BY leak
+       ) GROUP BY leak ORDER BY n DESC LIMIT ?`,
     )
     .all(limit) as unknown as { leak: Leak; n: number }[];
   return rows.map((r) => r.leak);

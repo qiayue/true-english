@@ -2,11 +2,13 @@ import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { scoreDifficulty } from '../core/difficulty.js';
 import { cleanPaste } from '../core/paste.js';
-import { makeCard, review } from '../core/review.js';
+import { makeCard, review, reviewComposition } from '../core/review.js';
 import {
   saveCard, saveAttempt, saveReview, saveComposition,
   detectReuse, chunksByFn, framesByFn, progress, stepsOf,
-  recordStep, todayView, deleteCard, type StepOutcome,
+  recordStep, todayView, deleteCard, dueChunks, chunkStats,
+  attemptedChunks, saveCompositionReview, compositions,
+  type StepOutcome,
 } from '../core/store.js';
 import { wordDiff, hint, type HintLevel } from '../core/steps.js';
 import { loadConfig, publicConfig, saveConfig, clearKey, type LlmConfig } from '../core/settings.js';
@@ -277,6 +279,7 @@ export async function submitAttempt(db: DatabaseSync, cardId: string, attemptTex
   saveReview(db, attemptId, r);
 
   return {
+    cardId,
     attemptId,
     review: r,
     original: card.original,
@@ -305,13 +308,23 @@ export function checkReuse(db: DatabaseSync, text: string) {
   return { hits, ok: hits.length >= 2, need: Math.max(0, 2 - hits.length) };
 }
 
-/** 仿写入库 + 词块复用检测（纯机械，不调 LLM） */
-export function compose(db: DatabaseSync, text: string, posted: boolean) {
+/**
+ * 仿写入库 + 词块复用检测（纯机械，不调 LLM）。
+ *
+ * 返回 compId：如果之后再点「批改」，批改会挂到同一条上，
+ * 而不是又存出一条一模一样的。
+ *
+ * **不动词块进度**。字符串匹配到只能说明他伸手去用了，不能说明用对了，
+ * 拿它升级会让系统误判掌握、把复习间隔拉长 —— 那是帮倒忙。
+ * 词块进度只在批改确认之后才动。
+ */
+export function compose(db: DatabaseSync, text: string, posted: boolean, compId?: string) {
   const t = text.trim();
   if (!t) throw new ApiError('仿写内容为空');
   const hits = detectReuse(db, t);
-  saveComposition(db, `comp_${randomUUID().slice(0, 8)}`, t, posted);
-  return { hits, ok: hits.length >= 2, need: Math.max(0, 2 - hits.length) };
+  const id = compId && /^comp_[\w-]+$/.test(compId) ? compId : `comp_${randomUUID().slice(0, 8)}`;
+  saveComposition(db, id, t, posted);
+  return { compId: id, hits, ok: hits.length >= 2, need: Math.max(0, 2 - hits.length) };
 }
 
 export function removeCard(db: DatabaseSync, cardId: string) {
@@ -419,6 +432,7 @@ export function importReview(db: DatabaseSync, cardId: string, attemptText: stri
   saveReview(db, attemptId, parsed.data);
 
   return {
+    cardId,
     attemptId,
     review: parsed.data,
     original: card.original,
@@ -530,4 +544,140 @@ function assertReviewMatchesCard(
         '多半是复制的时候串卡了，检查一下是不是贴错了 JSON。',
     );
   }
+}
+
+// ─────────────────────────────────────────────────────────────
+// 仿写闭环（M9）
+//
+// 这套系统在这里之前是瘸的：回译那一侧有四级支架、间隔重复、批改引擎、
+// 提示阶梯；仿写这一侧只有一个输入框和一个子串计数器，零反馈。
+// 但**仿写才是目的**，回译只是手段。
+//
+// 补的是一个环：
+//   给他今天该用的词块 → 他写 → 批改判定哪些真的用对了
+//   → 更新词块熟悉度 → 明天推该用的给他
+// ─────────────────────────────────────────────────────────────
+
+import { COMPOSE_SYSTEM, buildComposePrompt } from '../core/prompts/compose.js';
+import { ComposeReviewSchema } from '../core/schema.js';
+
+/**
+ * 仿写台的「今天试着用这几个」。
+ *
+ * 这是语料库从「能浏览的列表」变成「有调度的东西」的那一步。
+ * 60 个词块摆在那里，人是不会翻的；3 个摆在输入框上方，才会用。
+ */
+export function composeDeck(db: DatabaseSync, limit = 3, excludeCardId?: string) {
+  const chunks = dueChunks(db, Math.min(6, Math.max(1, limit)), new Date(), excludeCardId);
+  return { chunks, stats: chunkStats(db), weak: weakLeaks(db) };
+}
+
+/** 最近写过的仿写 + 它们的批改。写过的东西要能翻回来看，否则批改等于没存。 */
+export function composeHistory(db: DatabaseSync, limit = 30) {
+  const list = compositions(db, limit);
+  return { items: list, total: list.length };
+}
+
+function composeChunkContext(db: DatabaseSync) {
+  // 批改要判断「有没有用对」，得知道库里有哪些词块。整个库都给 ——
+  // 只给到期的那 3 个，他用了别的词块就判不出来了。
+  return chunksByFn(db).map((c) => ({ text: c.text, glossZh: c.gloss_zh }));
+}
+
+/**
+ * 批改一条仿写并落库。需要 LLM。
+ *
+ * `compId` 可选：如果这条已经机械存过档，批改挂到同一条上，
+ * 不会存出两条一模一样的。
+ */
+export async function submitComposition(
+  db: DatabaseSync, text: string, posted: boolean, compId?: string,
+) {
+  const t = text.trim();
+  if (!t) throw new ApiError('仿写内容为空');
+
+  const r = await reviewComposition(
+    { text: t, chunks: composeChunkContext(db) },
+    loadConfig(db),
+  );
+  return persistComposition(db, t, posted, r, compId);
+}
+
+/**
+ * 导出可复制的仿写批改请求。
+ *
+ * 和回译的 gradingRequest 一样**不落库** —— 导出和粘回来之间用户可能
+ * 中断，先写一条没有批改的记录只会让统计虚高。
+ */
+export function composeGradeRequest(db: DatabaseSync, text: string) {
+  const t = text.trim();
+  if (!t) throw new ApiError('仿写内容为空');
+  const schemaHint = JSON.stringify(z.toJSONSchema(ComposeReviewSchema), null, 2);
+  return {
+    text: t,
+    payload: [
+      COMPOSE_SYSTEM,
+      '',
+      '───────────────────────────────',
+      '',
+      buildComposePrompt({ text: t, chunks: composeChunkContext(db) }),
+      '',
+      '严格按下面这个 JSON Schema 输出，只输出 JSON，不要任何其他文字：',
+      '',
+      schemaHint,
+    ].join('\n'),
+  };
+}
+
+/** 把手工批改的仿写 JSON 贴回来。仿写正文和批改一次性原子写入。 */
+export function importComposeReview(
+  db: DatabaseSync, text: string, posted: boolean, raw: string, compId?: string,
+) {
+  const t = text.trim();
+  if (!t) throw new ApiError('仿写内容为空');
+
+  let obj: unknown;
+  try {
+    const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
+    obj = JSON.parse(cleaned);
+  } catch {
+    throw new ApiError('不是合法的 JSON。请确认复制完整，且没有多余文字。');
+  }
+
+  const parsed = ComposeReviewSchema.safeParse(obj);
+  if (!parsed.success) {
+    const issues = parsed.error.issues.slice(0, 4).map((i) => `${i.path.join('.')}: ${i.message}`);
+    throw new ApiError(`JSON 结构不符合要求：\n${issues.join('\n')}`);
+  }
+
+  return persistComposition(db, t, posted, parsed.data, compId);
+}
+
+/**
+ * 落库 + 更新词块熟悉度。两条路径（自动批改 / 手工粘贴）共用，
+ * 保证词块调度不会因为走了哪条路而不一致。
+ */
+function persistComposition(
+  db: DatabaseSync,
+  text: string,
+  posted: boolean,
+  r: import('../core/schema.js').ComposeReviewOut,
+  compId?: string,
+) {
+  const id = compId && /^comp_[\w-]+$/.test(compId) ? compId : `comp_${randomUUID().slice(0, 8)}`;
+  saveComposition(db, id, text, posted);
+
+  const attempted = attemptedChunks(db, text, r.chunkUse);
+  const { used, misused } = saveCompositionReview(db, id, r, attempted);
+
+  return {
+    compId: id,
+    review: r,
+    // 用对了的：只报文本，界面上是一排绿色的标签。
+    // 用错了的：连中文和原推例句一起给 —— 他伸手去用了却用错，
+    // 说明他以为自己会，这时候最该看的就是这个词块在原推里到底怎么用的。
+    used: used.map((c) => c.text),
+    misused: misused.map((c) => ({ text: c.text, glossZh: c.gloss_zh, example: c.example })),
+    next: dueChunks(db, 3),
+  };
 }

@@ -29,6 +29,29 @@ export const ReviewSchema = z.object({
   verdictZh: z.string().describe('一句话总评，中文'),
 });
 
+/**
+ * 仿写批改。
+ *
+ * 结构和回译批改有意做得不同：多了 nativeVersion（因为没有现成原文可比）
+ * 和 clarity（写作的第一目标是被读懂，这一项比语法重要），
+ * 少了 overlap（没有原文，重合度无从谈起）。
+ */
+export const ComposeReviewSchema = z.object({
+  nativeVersion: z
+    .string()
+    .describe('母语者表达同样意思会怎么写。保留他的意思、态度和信息量，写成真会发出去的推文'),
+  items: z.array(DiffItemSchema).describe('他写的 vs nativeVersion，逐处对比'),
+  clarity: z.enum(['clear', 'fuzzy', 'unclear']).describe('母语者能不能一遍读懂他想说什么'),
+  clarityZh: z.string().describe('对 clarity 的一句中文说明'),
+  chunkUse: z
+    .array(z.string())
+    .describe('他这条里**成功用对**的词块原文。用错的不要算 —— 算进去会让系统误判他已掌握'),
+  strengths: z.array(z.string()).describe('他具体做对了什么，中文，至少一条'),
+  verdictZh: z.string().describe('一句话总评，中文'),
+});
+
+export type ComposeReviewOut = z.infer<typeof ComposeReviewSchema>;
+
 export const FrameSchema = z.object({
   pattern: z.string().describe('挖空后的骨架，用 X / Y / ___ 占位'),
   fn: z.enum(FUNCTIONS),

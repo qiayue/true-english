@@ -82,6 +82,12 @@ async function route(req: http.IncomingMessage, url: URL): Promise<unknown> {
     return api.corpus(db, url.searchParams.get('fn') ?? undefined);
   }
   if (m === 'GET' && pathname === '/api/progress') return api.report(db);
+  if (m === 'GET' && pathname === '/api/compose/deck') {
+    const n = Number(url.searchParams.get('n') ?? '');
+    return api.composeDeck(db, Number.isFinite(n) && n > 0 ? n : 3,
+                           url.searchParams.get('not') ?? undefined);
+  }
+  if (m === 'GET' && pathname === '/api/compose/history') return api.composeHistory(db);
   if (m === 'GET' && pathname === '/api/today') {
     const b = Number(url.searchParams.get('budget') ?? '');
     return api.todayQueue(db, Number.isFinite(b) && b > 0 ? b : undefined);
@@ -165,7 +171,25 @@ async function route(req: http.IncomingMessage, url: URL): Promise<unknown> {
     if (pathname === '/api/reuse') return api.checkReuse(db, str(body.text, 'text'));
 
     if (pathname === '/api/compose') {
-      return api.compose(db, str(body.text, 'text'), body.posted === true);
+      return api.compose(
+        db, str(body.text, 'text'), body.posted === true,
+        typeof body.compId === 'string' ? body.compId : undefined,
+      );
+    }
+    if (pathname === '/api/compose/review') {
+      return api.submitComposition(
+        db, str(body.text, 'text'), body.posted === true,
+        typeof body.compId === 'string' ? body.compId : undefined,
+      );
+    }
+    if (pathname === '/api/compose/grade-request') {
+      return api.composeGradeRequest(db, str(body.text, 'text'));
+    }
+    if (pathname === '/api/compose/import') {
+      return api.importComposeReview(
+        db, str(body.text, 'text'), body.posted === true, str(body.json, 'json'),
+        typeof body.compId === 'string' ? body.compId : undefined,
+      );
     }
   }
 

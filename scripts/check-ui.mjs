@@ -35,15 +35,20 @@ for (const id of new Set(ids)) {
   errs.push(`按钮 ${id} 没有 handler`);
 }
 
-// ② JS 里引用的每个 $('#x') 都必须在 HTML 里真的存在
+// ② JS 里引用的每个 $('#x') 都必须真的能存在 ——
+// 要么写在 HTML 里，要么是 JS 自己动态建出来并赋上 id 的（`el.id = 'x'`）。
 const refs = [...html.matchAll(/\$\('#([\w-]+)'\)/g)].map((m) => m[1]);
 for (const id of new Set(refs)) {
-  if (!new RegExp(`id="${id}"`).test(html)) errs.push(`JS 引用了不存在的元素 #${id}`);
+  if (new RegExp(`id="${id}"`).test(html)) continue;
+  if (new RegExp(`\\.id\\s*=\\s*'${id}'`).test(body)) continue;
+  errs.push(`JS 引用了不存在的元素 #${id}`);
 }
 
 // ③ 被调用的函数都得有定义
-for (const fn of ['renderReview', 'renderFinish', 'renderStep', 'renderDiff',
-                  'setMode', 'setPhase', 'loadCards', 'openCard', 'reportStep']) {
+for (const fn of ['renderReview', 'renderFinish', 'renderStep', 'renderDiff', 'diffHtml',
+                  'setMode', 'setPhase', 'loadCards', 'openCard', 'reportStep',
+                  'renderCompose', 'loadDeck', 'loadHistory',
+                  'homeDesk', 'parkDesk', 'restoreDesk', 'deskToFinish']) {
   if (!new RegExp(`function ${fn}\\b`).test(body)) errs.push(`函数 ${fn} 不见了`);
 }
 

@@ -14,7 +14,7 @@
  */
 import { chromium } from 'playwright';
 import fs from 'node:fs';
-const B = 'http://localhost:5173';
+const B = process.env.BASE ?? 'http://localhost:5173';
 const found = [];
 const note = (sev, what) => found.push(`${sev} ${what}`);
 
@@ -67,16 +67,50 @@ const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' })
   await p.close();
 }
 
-// ③ 整段模式的键盘提交
+// ③ 每天都要用的输入框，键盘要能提交
+//
+// 这一条以前是**静态查源码**写的，而且写错了：正则带了 s 标志，
+// `#attempt` 后面跨了几百行匹配到别处的 keydown，于是一直假绿 ——
+// 明明没有快捷键，审计却说有。教训和 ② 一模一样：查源码查不出行为。
+// 现在改成真的按键，看按钮有没有被触发。
 {
   const p = await b.newPage();
-  await p.goto(B); await p.waitForTimeout(300);
-  const hasCtrlEnter = await p.evaluate(() => {
-    const src = [...document.scripts].map((s) => s.textContent).join('\n');
-    return /#attempt.*addEventListener\('keydown'/s.test(src) ||
-           src.includes("$('#attempt').addEventListener('keydown'");
-  });
-  if (!hasCtrlEnter) note('✗', '整段模式没有键盘提交（只能点鼠标）');
+  await p.goto(B); await p.waitForTimeout(400);
+  for (const [tab, prep, input, btn, label] of [
+    ['compose', null, '#compose', '#btn-compose-grade', '写作台'],
+    ['practice', 'card', '#attempt', '#btn-submit', '整段模式'],
+  ]) {
+    await p.click(`nav button[data-tab="${tab}"]`); await p.waitForTimeout(500);
+    if (prep === 'card') {
+      const items = await p.$$('#pick .item');
+      if (!items.length) {
+        // 静默跳过就是假绿。这份脚本存在的全部理由就是不许假绿。
+        note('✗', '库里没有卡片，整段模式的键盘提交没测到（先跑 smoke 或 seed:example）');
+        continue;
+      }
+      await items[0].click(); await p.waitForTimeout(500);
+      // 新卡默认落在照抄级，得走真实路径切到整段：展开支架选择器再点「整段」。
+      // 用 window.__ 后门把 setMode 直接调出来更省事，但那样测的就不是
+      // 用户真的会走的那条路了。
+      if (!(await p.isVisible('#attempt'))) {
+        await p.click('#btn-mode-toggle'); await p.waitForTimeout(200);
+        await p.click('#mode-switch button[data-stage="whole"]'); await p.waitForTimeout(600);
+      }
+      if (!(await p.isVisible('#attempt'))) { note('✗', '切不到整段模式，键盘提交没测到'); continue; }
+    }
+    const fired = await p.evaluate(([inputSel, btnSel]) => {
+      const el = document.querySelector(inputSel);
+      const btn = document.querySelector(btnSel);
+      if (!el || !btn) return null;
+      let hit = false;
+      btn.addEventListener('click', () => { hit = true; }, { once: true, capture: true });
+      el.focus();
+      el.dispatchEvent(new KeyboardEvent('keydown',
+        { key: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }));
+      return hit;
+    }, [input, btn]);
+    if (fired === false) note('✗', `${label} 没有键盘提交（只能点鼠标）`);
+  }
   await p.close();
 }
 
@@ -84,7 +118,8 @@ const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' })
 {
   const p = await b.newPage();
   await p.goto(B); await p.waitForTimeout(300);
-  for (const [tab, sel] of [['corpus', '#corpus-out'], ['report', '#report-out']]) {
+  for (const [tab, sel] of [['corpus', '#corpus-out'], ['report', '#report-out'],
+                            ['compose', '#desk-due'], ['compose', '#history-out']]) {
     await p.click(`nav button[data-tab="${tab}"]`); await p.waitForTimeout(600);
     const txt = (await p.textContent(sel)).trim();
     if (!txt) note('✗', `${tab} 标签页空状态什么都不显示`);
@@ -101,6 +136,24 @@ const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' })
     return !src.includes(':focus-visible');
   });
   if (noFocus) note('△', 'CSS 里没有 :focus-visible 样式，键盘导航看不见焦点');
+  await p.close();
+}
+
+// ⑥ 写作台永远只有一份，而且写作页上永远找得到它
+//
+// 全应用只有一份写作台，它会在「练习页的批改结果下面」和「写作标签页」
+// 之间来回搬。搬重了（两个同 id 的节点）或者搬丢了，都是静默故障：
+// 别的断言不会红，用户看到的是一片空白或者两个一模一样的输入框。
+// 搬家过程中内容会不会丢，由 smoke 走完整批改流程去验。
+{
+  const p = await b.newPage();
+  await p.goto(B); await p.waitForTimeout(400);
+  for (const tab of ['practice', 'compose', 'corpus', 'report', 'settings', 'compose']) {
+    await p.click(`nav button[data-tab="${tab}"]`); await p.waitForTimeout(350);
+    const n = await p.evaluate(() => document.querySelectorAll('#desk').length);
+    if (n !== 1) { note('✗', `切到 ${tab} 后页面上有 ${n} 份写作台（应该恰好 1 份）`); break; }
+  }
+  if (!(await p.isVisible('#compose'))) note('✗', '走一圈标签页之后，写作台在写作页上不见了');
   await p.close();
 }
 

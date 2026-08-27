@@ -1,8 +1,8 @@
 import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { Card, Attempt } from './types.js';
-import type { ReviewOut } from './schema.js';
+import type { Card, Attempt, DiffItem } from './types.js';
+import type { ReviewOut, ComposeReviewOut } from './schema.js';
 import type { Fn, Leak } from './taxonomy.js';
 
 /**
@@ -67,12 +67,51 @@ CREATE TABLE IF NOT EXISTS step_progress (
 CREATE TABLE IF NOT EXISTS compositions (
   id TEXT PRIMARY KEY, text TEXT NOT NULL, posted INTEGER DEFAULT 0, created_at TEXT NOT NULL
 );
+
+-- 词块级掌握度。**整套系统的目的在这张表里**。
+--
+-- 原来词块只被 detectReuse 数过一次，数完就扔 —— 语料库有 60 个词块，
+-- 系统不知道你哪个用过、哪个用对过、哪个该再推给你。回译那一侧有
+-- 四级支架和间隔重复，仿写这一侧连「今天该用哪几个」都答不上来。
+-- 这张表就是把 step_progress 那套调度搬到产出侧。
+CREATE TABLE IF NOT EXISTS chunk_progress (
+  chunk_id INTEGER PRIMARY KEY,
+  box INTEGER NOT NULL DEFAULT 0,
+  due_at TEXT NOT NULL,
+  uses INTEGER NOT NULL DEFAULT 0,      -- 用对过几次
+  misuses INTEGER NOT NULL DEFAULT 0,   -- 伸手去用但用错了几次
+  verified INTEGER NOT NULL DEFAULT 0,  -- 有没有被批改确认过（不是只被字符串匹配到）
+  last_at TEXT NOT NULL
+);
+
+-- 仿写批改。和回译批改分开存：没有 overlap（没有原文），
+-- 多了 native_version（母语者会怎么写）和 clarity（意思传达出来了吗）。
+CREATE TABLE IF NOT EXISTS composition_reviews (
+  comp_id TEXT PRIMARY KEY,
+  native_version TEXT NOT NULL,
+  clarity TEXT NOT NULL, clarity_zh TEXT,
+  verdict_zh TEXT, strengths TEXT, chunk_use TEXT,
+  created_at TEXT NOT NULL
+);
+
+-- 仿写的差异条目。刻意**不并进 diff_items**：
+-- 两边的来源不同（一个是还原别人的句子，一个是说自己的话），
+-- 报告里要能分开看「回译时的漏点」和「自由写作时的漏点」——
+-- 后者才是真实写作水平。但算个人漏点画像时两边合并，因为漏的是同一个人。
+CREATE TABLE IF NOT EXISTS comp_diff_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, comp_id TEXT NOT NULL,
+  mine TEXT, native TEXT, category TEXT NOT NULL, verdict TEXT NOT NULL,
+  leak TEXT, explain_zh TEXT, rule TEXT
+);
 CREATE INDEX IF NOT EXISTS idx_steps_card ON steps(card_id, idx);
 CREATE INDEX IF NOT EXISTS idx_progress_due ON step_progress(due_at);
 CREATE INDEX IF NOT EXISTS idx_chunks_fn ON chunks(fn);
 CREATE INDEX IF NOT EXISTS idx_frames_fn ON frames(fn);
 CREATE INDEX IF NOT EXISTS idx_diff_leak ON diff_items(leak);
 CREATE INDEX IF NOT EXISTS idx_diff_attempt ON diff_items(attempt_id);
+CREATE INDEX IF NOT EXISTS idx_chunkprog_due ON chunk_progress(due_at);
+CREATE INDEX IF NOT EXISTS idx_compdiff_comp ON comp_diff_items(comp_id);
+CREATE INDEX IF NOT EXISTS idx_compdiff_leak ON comp_diff_items(leak);
 `;
 
 export const DEFAULT_DB = 'data/true-english.db';
@@ -145,6 +184,9 @@ export function deleteCard(db: DatabaseSync, cardId: string): { deleted: Record<
   run('练习进度', 'DELETE FROM step_progress WHERE card_id = ?', cardId);
   run('步骤', 'DELETE FROM steps WHERE card_id = ?', cardId);
   run('骨架', 'DELETE FROM frames WHERE card_id = ?', cardId);
+  // 先清词块进度再删词块 —— 反过来就找不到该清哪些了，留下一堆孤儿行，
+  // 而 chunk_id 是自增主键，将来会被新词块复用，孤儿进度会张冠李戴。
+  db.prepare('DELETE FROM chunk_progress WHERE chunk_id IN (SELECT id FROM chunks WHERE card_id = ?)').run(cardId);
   run('词块', 'DELETE FROM chunks WHERE card_id = ?', cardId);
   run('卡片', 'DELETE FROM cards WHERE id = ?', cardId);
 
@@ -375,8 +417,11 @@ export function detectReuse(db: DatabaseSync, text: string): StoredChunk[] {
 export interface LeakStat {
   leak: Leak;
   count: number;
+  /** 其中有多少次是在**自己写的**句子里犯的。这个数字比 count 重要：
+   *  回译时漏冠词，可能只是没记住原文；自由写作时漏冠词，才是真的不会。 */
+  free: number;
   share: number;
-  samples: { mine: string; native: string; explain: string }[];
+  samples: { mine: string; native: string; explain: string; free: boolean }[];
 }
 
 export interface Progress {
@@ -388,6 +433,11 @@ export interface Progress {
   compositions: number;
   reuseRate: number;
   topRules: { rule: string; count: number }[];
+  /** 词块的三档状态。坟场率就在这里：库里有多少，真正用过多少 */
+  chunks: { total: number; used: number; verified: number; misused: number; due: number };
+  /** 批改过的仿写数，以及清晰度分布 —— 写作的第一目标是被读懂 */
+  composeReviews: number;
+  clarity: { clear: number; fuzzy: number; unclear: number };
 }
 
 /**
@@ -416,35 +466,71 @@ export function progress(db: DatabaseSync): Progress {
   ).map((r) => ({ attemptId: r.attemptId, pct: r.total > 0 ? Math.round((r.matched / r.total) * 100) : 0, at: r.at }));
 
   const leakRows = db
-    .prepare('SELECT leak, COUNT(*) AS n FROM diff_items WHERE leak IS NOT NULL GROUP BY leak ORDER BY n DESC')
-    .all() as unknown as { leak: Leak; n: number }[];
+    .prepare(
+      `SELECT leak, SUM(n) AS n, SUM(free) AS free FROM (
+         SELECT leak, COUNT(*) AS n, 0 AS free FROM diff_items WHERE leak IS NOT NULL GROUP BY leak
+         UNION ALL
+         SELECT leak, COUNT(*) AS n, COUNT(*) AS free FROM comp_diff_items WHERE leak IS NOT NULL GROUP BY leak
+       ) GROUP BY leak ORDER BY n DESC`,
+    )
+    .all() as unknown as { leak: Leak; n: number; free: number }[];
   const leakTotal = leakRows.reduce((s, r) => s + r.n, 0);
+  // 样本两边都取。自由写作里的那处排前面 —— 同一个漏点，
+  // 在自己写的句子里犯的那次比在回译里犯的那次说明的问题严重得多。
   const sampleStmt = db.prepare(
-    'SELECT mine, native, explain_zh FROM diff_items WHERE leak = ? ORDER BY id DESC LIMIT 4',
+    `SELECT mine, native, explain_zh, free FROM (
+       SELECT id, mine, native, explain_zh, 0 AS free FROM diff_items WHERE leak = ?1
+       UNION ALL
+       SELECT id, mine, native, explain_zh, 1 AS free FROM comp_diff_items WHERE leak = ?1
+     ) ORDER BY free DESC, id DESC LIMIT 4`,
   );
   const leaks: LeakStat[] = leakRows.map((r) => ({
     leak: r.leak,
     count: r.n,
+    free: r.free,
     share: leakTotal > 0 ? r.n / leakTotal : 0,
-    samples: (sampleStmt.all(r.leak) as unknown as { mine: string; native: string; explain_zh: string }[]).map((s) => ({
-      mine: s.mine, native: s.native, explain: s.explain_zh,
-    })),
+    samples: (
+      sampleStmt.all(r.leak) as unknown as { mine: string; native: string; explain_zh: string; free: number }[]
+    ).map((s) => ({ mine: s.mine, native: s.native, explain: s.explain_zh, free: !!s.free })),
   }));
 
   const categories = db
-    .prepare('SELECT category, COUNT(*) AS count FROM diff_items GROUP BY category ORDER BY count DESC')
+    .prepare(
+      `SELECT category, SUM(c) AS count FROM (
+         SELECT category, COUNT(*) AS c FROM diff_items GROUP BY category
+         UNION ALL SELECT category, COUNT(*) AS c FROM comp_diff_items GROUP BY category
+       ) GROUP BY category ORDER BY count DESC`,
+    )
     .all() as unknown as { category: string; count: number }[];
   const verdicts = db
-    .prepare('SELECT verdict, COUNT(*) AS count FROM diff_items GROUP BY verdict ORDER BY count DESC')
+    .prepare(
+      `SELECT verdict, SUM(c) AS count FROM (
+         SELECT verdict, COUNT(*) AS c FROM diff_items GROUP BY verdict
+         UNION ALL SELECT verdict, COUNT(*) AS c FROM comp_diff_items GROUP BY verdict
+       ) GROUP BY verdict ORDER BY count DESC`,
+    )
     .all() as unknown as { verdict: string; count: number }[];
 
   const comps = db.prepare('SELECT id, text FROM compositions').all() as unknown as { id: string; text: string }[];
   const withReuse = comps.filter((c) => detectReuse(db, c.text).length >= 2).length;
 
+  const clarityRows = db
+    .prepare('SELECT clarity, COUNT(*) AS n FROM composition_reviews GROUP BY clarity')
+    .all() as unknown as { clarity: string; n: number }[];
+  const clarity = { clear: 0, fuzzy: 0, unclear: 0 };
+  for (const c of clarityRows) {
+    if (c.clarity in clarity) clarity[c.clarity as keyof typeof clarity] = c.n;
+  }
+
   const topRules = db
     .prepare(
-      `SELECT rule, COUNT(*) AS count FROM diff_items
-       WHERE rule IS NOT NULL AND rule <> '' GROUP BY rule ORDER BY count DESC LIMIT 5`,
+      `SELECT rule, SUM(count) AS count FROM (
+         SELECT rule, COUNT(*) AS count FROM diff_items
+           WHERE rule IS NOT NULL AND rule <> '' GROUP BY rule
+         UNION ALL
+         SELECT rule, COUNT(*) AS count FROM comp_diff_items
+           WHERE rule IS NOT NULL AND rule <> '' GROUP BY rule
+       ) GROUP BY rule ORDER BY count DESC LIMIT 5`,
     )
     .all() as unknown as { rule: string; count: number }[];
 
@@ -457,5 +543,330 @@ export function progress(db: DatabaseSync): Progress {
     compositions: comps.length,
     reuseRate: comps.length > 0 ? withReuse / comps.length : 0,
     topRules,
+    chunks: chunkStats(db),
+    composeReviews: clarityRows.reduce((n, c) => n + c.n, 0),
+    clarity,
   };
+}
+
+// ─────────────────────────────────────────────────────────────
+// 词块调度 —— 产出侧的间隔重复
+//
+// 回译那一侧解决的是「能不能还原别人的句子」，词块这一侧解决的是
+// 「能不能在说自己的话时把它调出来」。后者才是这个项目的目标。
+// 两者的记忆机制不同：回译是再认，用词块是提取。所以要分开调度。
+// ─────────────────────────────────────────────────────────────
+
+export interface ChunkOutcome {
+  /** 用对了 */
+  correct: boolean;
+  /**
+   * 这个判定是不是批改确认过的。
+   *
+   * 字符串匹配到 ≠ 用对了。"be about to" 出现在句子里，可能是
+   * "I be about to go"。只凭匹配就升级，等于系统自己骗自己：
+   * 复习间隔被拉长，那个错误从此没人再纠正。
+   */
+  verified: boolean;
+}
+
+/** 没经过批改确认的「用过」，最多只能升到这一格 */
+const UNVERIFIED_CAP = 1;
+
+/**
+ * 记一次词块使用。
+ *
+ * - 用对了 + 批改确认 → 升一格
+ * - 用对了 + 只是匹配到 → 最多升到第 1 格（够了「别天天推给我」，不够称「掌握」）
+ * - 用错了 → 打回第 0 格。这是最强的信号：他伸手去用了，而且用错了，
+ *   说明他以为自己会 —— 这种错比没用过危险得多，必须马上回来。
+ */
+export function recordChunkUse(
+  db: DatabaseSync,
+  chunkId: number,
+  o: ChunkOutcome,
+  now = new Date(),
+): { box: number; dueAt: string } {
+  const prev = db
+    .prepare('SELECT box, uses, misuses, verified FROM chunk_progress WHERE chunk_id = ?')
+    .get(chunkId) as unknown as { box: number; uses: number; misuses: number; verified: number } | undefined;
+
+  const oldBox = prev?.box ?? 0;
+  let box: number;
+  if (!o.correct) box = 0;
+  else if (o.verified) box = Math.min(MAX_BOX, oldBox + 1);
+  else box = Math.max(oldBox, Math.min(oldBox + 1, UNVERIFIED_CAP));
+
+  const dueAt = new Date(now.getTime() + BOX_HOURS[box]! * 3600_000).toISOString();
+  db.prepare(
+    `INSERT INTO chunk_progress (chunk_id, box, due_at, uses, misuses, verified, last_at)
+     VALUES (?,?,?,?,?,?,?)
+     ON CONFLICT(chunk_id) DO UPDATE SET
+       box = excluded.box, due_at = excluded.due_at, uses = excluded.uses,
+       misuses = excluded.misuses, verified = excluded.verified, last_at = excluded.last_at`,
+  ).run(
+    chunkId, box, dueAt,
+    (prev?.uses ?? 0) + (o.correct ? 1 : 0),
+    (prev?.misuses ?? 0) + (o.correct ? 0 : 1),
+    (prev?.verified ?? 0) || (o.correct && o.verified ? 1 : 0),
+    now.toISOString(),
+  );
+  return { box, dueAt };
+}
+
+export interface DueChunk extends StoredChunk {
+  box: number | null;
+  uses: number;
+  misuses: number;
+  verified: boolean;
+  /** 为什么推这个 —— 界面上要说人话 */
+  why: string;
+}
+
+/**
+ * 今天该试着用的词块。
+ *
+ * 三类，按这个优先级：
+ *
+ * 1. **用错过的**（misuses > 0 且到期）—— 最紧急。他以为自己会。
+ * 2. **从没用过的**（没有进度行）—— 方法论的铁律是「当天必须用它说
+ *    3 件你自己的事，不许『以后再用』」。刚入库的词块最该马上用掉。
+ * 3. **到期复习的** —— 上次用对了，该验证是不是真的留下了。
+ *
+ * 只给 3 个。给多了就变成待办清单，而清单是用来焦虑的，不是用来写作的。
+ * 一条推文塞 8 个词块也不是写作，是造句练习。
+ */
+export function dueChunks(
+  db: DatabaseSync, limit = 3, now = new Date(), excludeCardId?: string,
+): DueChunk[] {
+  const iso = now.toISOString();
+  // excludeCardId：刚练完那张卡的词块已经单独钉在输入框上方了，
+  // 再在「今天该用的」里列一遍，同一个词块在一屏里出现两次 —— 那不是强调，是噪音。
+  const rows = db
+    .prepare(
+      `SELECT c.id, c.text, c.fn, c.gloss_zh, c.example,
+              p.box, p.due_at AS dueAt, p.uses, p.misuses, p.verified,
+              (SELECT created_at FROM cards WHERE id = c.card_id) AS cardAt
+       FROM chunks c LEFT JOIN chunk_progress p ON p.chunk_id = c.id
+       WHERE (p.chunk_id IS NULL OR p.due_at <= ?1)
+         AND (?2 IS NULL OR c.card_id <> ?2)`,
+    )
+    .all(iso, excludeCardId ?? null) as unknown as (StoredChunk & {
+      box: number | null; dueAt: string | null; uses: number | null;
+      misuses: number | null; verified: number | null; cardAt: string | null;
+    })[];
+
+  const scored = rows.map((r) => {
+    const fresh = r.box === null;
+    const misused = (r.misuses ?? 0) > 0;
+    // 逾期越久越靠前，封顶 3 天，免得陈年积压把新词块永远挤掉
+    const overdueDays = r.dueAt
+      ? Math.min(3, Math.max(0, (now.getTime() - new Date(r.dueAt).getTime()) / 86_400_000))
+      : 0;
+    // 用错过的压过所有其他情况（6 > 新词块的 3 + 最多 2 分新鲜度加成）。
+    // 「他伸手去用了，而且用错了」是这套系统能拿到的最强信号 ——
+    // 说明他以为自己会。这种错比从没用过危险得多，该排在最前面看见。
+    const score =
+      (misused ? 6 : 0) +
+      (fresh ? 3 : 0) +
+      overdueDays +
+      (fresh && r.cardAt ? recencyBonus(r.cardAt, now) : 0);
+    const why = misused
+      ? `上次用错了（${r.misuses} 次）—— 你以为自己会`
+      : fresh
+        ? '刚入库，还没用过'
+        : '上次用对了，该再用一次看看是不是真留下了';
+    return {
+      id: r.id, text: r.text, fn: r.fn, gloss_zh: r.gloss_zh, example: r.example,
+      box: r.box, uses: r.uses ?? 0, misuses: r.misuses ?? 0, verified: !!r.verified,
+      why, score,
+    };
+  });
+
+  scored.sort((a, b) => b.score - a.score || a.id - b.id);
+  return scored.slice(0, limit).map(({ score: _score, ...c }) => c);
+}
+
+/** 刚做完的那张卡，它的词块今天最该被用掉 */
+function recencyBonus(cardAt: string, now: Date): number {
+  const days = (now.getTime() - new Date(cardAt).getTime()) / 86_400_000;
+  return days <= 1 ? 2 : days <= 3 ? 1 : 0;
+}
+
+export function chunkStats(db: DatabaseSync): {
+  total: number; used: number; verified: number; misused: number; due: number;
+} {
+  const q = (sql: string) => (db.prepare(sql).get(new Date().toISOString()) as { n: number }).n;
+  return {
+    total: (db.prepare('SELECT COUNT(*) AS n FROM chunks').get() as { n: number }).n,
+    used: (db.prepare('SELECT COUNT(*) AS n FROM chunk_progress WHERE uses > 0').get() as { n: number }).n,
+    verified: (db.prepare('SELECT COUNT(*) AS n FROM chunk_progress WHERE verified = 1').get() as { n: number }).n,
+    misused: (db.prepare('SELECT COUNT(*) AS n FROM chunk_progress WHERE misuses > 0').get() as { n: number }).n,
+    due: q(
+      `SELECT COUNT(*) AS n FROM chunks c LEFT JOIN chunk_progress p ON p.chunk_id = c.id
+       WHERE p.chunk_id IS NULL OR p.due_at <= ?`,
+    ),
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
+// 仿写批改
+// ─────────────────────────────────────────────────────────────
+
+export interface StoredComposition {
+  id: string;
+  text: string;
+  posted: boolean;
+  createdAt: string;
+  review: {
+    nativeVersion: string;
+    clarity: string;
+    clarityZh: string;
+    verdictZh: string;
+    strengths: string[];
+    chunkUse: string[];
+    items: DiffItem[];
+  } | null;
+}
+
+/**
+ * 存一次仿写批改，并顺手更新词块掌握度。
+ *
+ * 两件事必须一起做，这正是 M9 要补的那个环：
+ *
+ *   仿写批改 → 判定他有没有真的用对词块 → 更新词块熟悉度 → 下次推该用的给他
+ *
+ * `attempted` 是机械匹配「他伸手去用了哪些」，`chunkUse` 是批改确认
+ * 「哪些真的用对了」。两者的差集就是**用错了**的 —— 这是整套系统里
+ * 唯一能拿到的「他以为自己会但其实不会」的信号，必须落库。
+ */
+/**
+ * 这条仿写「伸手去用了」哪些词块。
+ *
+ * 两个来源合并，缺一不可：
+ * - `detectReuse` 的字符串匹配 —— 抓到他试图用、但可能用错的
+ * - 批改点名的 `chunkUse` —— 抓到他用了变体形态、字符串匹配漏掉的
+ *
+ * 只用前者会把「用对了但换了个形态」判成没用；只用后者会把
+ * 「用错了」的直接漏掉，而用错恰恰是最该记的那种。
+ */
+export function attemptedChunks(db: DatabaseSync, text: string, chunkUse: string[] = []): StoredChunk[] {
+  const byId = new Map<number, StoredChunk>();
+  for (const c of detectReuse(db, text)) byId.set(c.id, c);
+  if (chunkUse.length > 0) {
+    const named = chunkUse.map(normalize).filter(Boolean);
+    for (const c of chunksByFn(db)) {
+      if (namesChunk(named, c.text)) byId.set(c.id, c);
+    }
+  }
+  return [...byId.values()];
+}
+
+export function saveCompositionReview(
+  db: DatabaseSync,
+  compId: string,
+  r: ComposeReviewOut,
+  attempted: StoredChunk[],
+  now = new Date(),
+): { used: StoredChunk[]; misused: StoredChunk[] } {
+  db.prepare(
+    `INSERT OR REPLACE INTO composition_reviews
+       (comp_id, native_version, clarity, clarity_zh, verdict_zh, strengths, chunk_use, created_at)
+     VALUES (?,?,?,?,?,?,?,?)`,
+  ).run(
+    compId, r.nativeVersion, r.clarity, r.clarityZh, r.verdictZh,
+    JSON.stringify(r.strengths), JSON.stringify(r.chunkUse), now.toISOString(),
+  );
+
+  db.prepare('DELETE FROM comp_diff_items WHERE comp_id = ?').run(compId);
+  const ins = db.prepare(
+    `INSERT INTO comp_diff_items (comp_id, mine, native, category, verdict, leak, explain_zh, rule)
+     VALUES (?,?,?,?,?,?,?,?)`,
+  );
+  for (const it of r.items) {
+    ins.run(compId, it.mine, it.native, it.category, it.verdict, it.leak ?? null, it.explainZh, it.rule ?? null);
+  }
+
+  const named = r.chunkUse.map(normalize).filter(Boolean);
+  const used: StoredChunk[] = [];
+  const misused: StoredChunk[] = [];
+  for (const c of attempted) {
+    const correct = namesChunk(named, c.text);
+    recordChunkUse(db, c.id, { correct, verified: true }, now);
+    (correct ? used : misused).push(c);
+  }
+  // 判定原样返回，不让调用方自己再判一次 —— 判两次迟早判出两个答案，
+  // 于是界面说「用对了」而复习间隔按「用错了」走。
+  return { used, misused };
+}
+
+/**
+ * 批改点名的词块，是不是指的这一个。
+ *
+ * 不能只做字符串相等。批改被要求原样照抄词块文本，但实际上它经常只报
+ * 用到的那一截 —— 库里是 `a new X built on Y`，它回 `built on`。
+ * 严格相等的话，一次**完全正确**的使用会被判成用错，然后打回第 0 格。
+ * 罚对了的人比放过错了的人伤害大得多：他会不知道自己错在哪，
+ * 而系统还在一遍遍把这个词块推回来。
+ *
+ * 所以放宽到互为子串（长度 ≥ 4，避免 `on`、`the` 这种碰瓷）。
+ */
+function namesChunk(named: string[], chunkText: string): boolean {
+  const target = normalize(chunkText);
+  if (!target) return false;
+  return named.some((n) =>
+    n === target || (n.length >= 4 && (target.includes(n) || n.includes(target))));
+}
+
+export function compositions(db: DatabaseSync, limit = 30): StoredComposition[] {
+  const rows = db
+    .prepare(
+      `SELECT c.id, c.text, c.posted, c.created_at AS createdAt,
+              r.native_version AS nativeVersion, r.clarity, r.clarity_zh AS clarityZh,
+              r.verdict_zh AS verdictZh, r.strengths, r.chunk_use AS chunkUse
+       FROM compositions c LEFT JOIN composition_reviews r ON r.comp_id = c.id
+       ORDER BY c.created_at DESC LIMIT ?`,
+    )
+    .all(limit) as unknown as {
+      id: string; text: string; posted: number; createdAt: string;
+      nativeVersion: string | null; clarity: string | null; clarityZh: string | null;
+      verdictZh: string | null; strengths: string | null; chunkUse: string | null;
+    }[];
+
+  const itemStmt = db.prepare(
+    `SELECT mine, native, category, verdict, leak, explain_zh AS explainZh, rule
+     FROM comp_diff_items WHERE comp_id = ? ORDER BY id`,
+  );
+
+  return rows.map((r) => ({
+    id: r.id,
+    text: r.text,
+    posted: !!r.posted,
+    createdAt: r.createdAt,
+    review: r.nativeVersion
+      ? {
+          nativeVersion: r.nativeVersion,
+          clarity: r.clarity ?? 'clear',
+          clarityZh: r.clarityZh ?? '',
+          verdictZh: r.verdictZh ?? '',
+          strengths: safeParse(r.strengths),
+          chunkUse: safeParse(r.chunkUse),
+          items: itemStmt.all(r.id) as unknown as DiffItem[],
+        }
+      : null,
+  }));
+}
+
+function safeParse(s: string | null): string[] {
+  if (!s) return [];
+  try {
+    const v = JSON.parse(s);
+    return Array.isArray(v) ? v.map(String) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function compositionById(db: DatabaseSync, id: string): StoredComposition | undefined {
+  return compositions(db, 1000).find((c) => c.id === id);
 }
