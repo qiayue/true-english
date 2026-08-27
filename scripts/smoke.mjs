@@ -93,6 +93,15 @@ check('照抄的主按钮是「遮住」', (await p.textContent('#btn-step-prima
 await p.click('#btn-step-primary'); await p.waitForTimeout(350);
 check('遮住后原文没了', !(await p.textContent('#step-out')).includes(STEP_ANSWERS[0]));
 check('遮住后可以打字', await p.isVisible('#step-input'));
+// 「再看一眼」在照抄级要能把原文重新拿出来 —— 这一级没有 diff 可渲染，
+// 曾经因此点了没反应
+check('遮住后有「再看一眼」', await p.isVisible('#btn-step-peek'));
+await p.click('#btn-step-peek'); await p.waitForTimeout(400);
+check('★ 再看一眼能重新显示原文',
+  (await p.textContent('#step-out')).includes(STEP_ANSWERS[0]),
+  (await p.textContent('#step-out')).slice(0, 40));
+await p.click('#btn-step-primary'); await p.waitForTimeout(350);
+check('再遮住又能打字', await p.isVisible('#step-input'));
 await p.fill('#step-input', STEP_ANSWERS[0]);
 await p.keyboard.press('Enter'); await p.waitForTimeout(500);
 check('照抄打对了判过', (await p.textContent('#btn-step-primary')).includes('下一步'),

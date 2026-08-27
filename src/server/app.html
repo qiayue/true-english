@@ -788,7 +788,16 @@ $('#btn-step-accept').onclick = () => {
   setPhase('hit');
 };
 
-$('#btn-step-peek').onclick = () => {
+/**
+ * 再看一眼。
+ *
+ * 两级支架要看的东西不一样：逐句级看的是上次的对照结果，
+ * 照抄级根本没有对照 —— 它要看的是原文本身。
+ * 原来只写了 renderDiff(LAST_DIFF)，而照抄级的 LAST_DIFF 是 null，
+ * 于是阶段切回「看」，却什么都没显示。
+ */
+$('#btn-step-peek').onclick = async () => {
+  if (STAGE === 'copy') { await enterCopy(); return; }
   if (LAST_DIFF) renderDiff(LAST_DIFF);
   setPhase('study');
 };
