@@ -70,6 +70,19 @@ saveReview(db, 'att1', {
   overlap: { matched: 1, total: 2 }, strengths: ['x'], verdictZh: 'x',
 });
 t('漏点统计出来了', weakLeaks(db)[0] === 'article', weakLeaks(db).join(','));
+
+// 拼写和大小写不该参与出题：挖掉一个拼错过的单词，考的是打字不是语法。
+// 而且手滑比语法错好犯，次数常年最多 —— 不过滤的话它们会把冠词挤出前四。
+saveAttempt(db, { id: 'att2', cardId: 'card_N2', text: 'x', createdAt: T0.toISOString() });
+saveReview(db, 'att2', {
+  items: Array.from({ length: 20 }, () => ({
+    mine: 'Cloudfalre', native: 'Cloudflare', category: 'leak' as const, verdict: 'wrong' as const,
+    leak: 'spelling' as const, explainZh: '手滑', rule: null,
+  })),
+  overlap: { matched: 1, total: 2 }, strengths: ['x'], verdictZh: 'x',
+});
+t('拼写次数再多也不参与出题', !weakLeaks(db).includes('spelling' as never), weakLeaks(db).join(','));
+t('被挤掉之后冠词还在', weakLeaks(db)[0] === 'article', weakLeaks(db).join(','));
 mk('W1', 'this one has the article in it');   // 命中 article
 mk('W2', 'plain words without that marker');  // 不命中
 {

@@ -1,5 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
-import type { Leak } from './taxonomy.js';
+import { isDrillable, type DrillableLeak, type Leak } from './taxonomy.js';
 
 /**
  * 支架的四级，以及「今天练什么」的排程。
@@ -63,17 +63,19 @@ export function estimateMinutes(stage: Stage, steps: number): number {
  * 那个位置有没有 the；自己写句子时漏冠词，才说明这条规则根本没进脑子。
  * 后者是真实写作水平，是这个项目的目标，权重理应更高。
  */
-export function weakLeaks(db: DatabaseSync, limit = 4): Leak[] {
+export function weakLeaks(db: DatabaseSync, limit = 4): DrillableLeak[] {
   const rows = db
     .prepare(
       `SELECT leak, SUM(n) AS n FROM (
          SELECT leak, COUNT(*) AS n FROM diff_items WHERE leak IS NOT NULL GROUP BY leak
          UNION ALL
          SELECT leak, COUNT(*) * 2 AS n FROM comp_diff_items WHERE leak IS NOT NULL GROUP BY leak
-       ) GROUP BY leak ORDER BY n DESC LIMIT ?`,
+       ) GROUP BY leak ORDER BY n DESC`,
     )
-    .all(limit) as unknown as { leak: Leak; n: number }[];
-  return rows.map((r) => r.leak);
+    .all() as unknown as { leak: Leak; n: number }[];
+  // 先过滤再截断。反过来的话，拼写和大小写（手滑比语法错好犯，次数常年最多）
+  // 会先占掉前四名，等过滤完只剩一两个真正能练的。
+  return rows.map((r) => r.leak).filter(isDrillable).slice(0, limit);
 }
 
 export interface PlanItem {
@@ -105,7 +107,7 @@ interface Row {
   earliestDue: string | null; textLower: string;
 }
 
-const LEAK_MARKERS: Record<Leak, RegExp> = {
+const LEAK_MARKERS: Record<DrillableLeak, RegExp> = {
   article: /\b(a|an|the)\b/,
   preposition: /\b(on|in|at|of|to|for|with|about|from|by)\b/,
   tense: /\b(was|were|had|did)\b|\b\w+ed\b/,

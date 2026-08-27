@@ -519,7 +519,8 @@ async function copy(text, btn) {
 let AUTO = false;
 const VERDICT = { wrong: '错', unnatural: '可以，但母语者不会这么说', equal: '一样好' };
 const CATEGORY = { chunk: '词块', structure: '结构', tone: '语气', leak: '硬伤' };
-const LEAK = { article:'冠词', tense:'时态', number:'单复数', preposition:'介词', agreement:'主谓一致', wordform:'词形' };
+const LEAK = { article:'冠词', tense:'时态', number:'单复数', preposition:'介词',
+               agreement:'主谓一致', wordform:'词形', spelling:'拼写', casing:'大小写' };
 
 // ── tabs ──
 $$('nav button').forEach((b) => b.onclick = () => {
@@ -1110,6 +1111,8 @@ window.__render = renderReview;
 
 // ── 填空级 ──
 
+// 填空只考语法位置，拼写和大小写挖不出有意义的空（那是在考打字），
+// 所以这里只有可出题的那六类 —— 服务端也只会送这六类过来。
 const LEAK_TIP = {
   article: '冠词', tense: '时态', number: '单复数',
   preposition: '介词', agreement: '主谓一致', wordform: '词形',
@@ -1551,7 +1554,14 @@ async function loadReport() {
     }
 
     if (p.leaks.length) {
-      h += `<div><h2>你的错误模式</h2>` + p.leaks.slice(0, 5).map((l, i) => `
+      // 手滑和不会，修法完全不同：一个是写完读一遍，一个是重新学规则。
+      // 混在一起看，人会去补根本没问题的语法。
+      const typoN = p.leaks.filter((l) => l.leak === 'spelling' || l.leak === 'casing')
+        .reduce((n, l) => n + l.count, 0);
+      const allN = p.leaks.reduce((n, l) => n + l.count, 0);
+      h += `<div><h2>你的错误模式</h2>` +
+        (typoN > 0 ? `<p style="margin-top:.3rem">其中 <span class="mono">${typoN}/${allN}</span> 次只是<strong>手滑</strong>（拼写、大小写）。
+          这类不用学语法，<strong>写完出声读一遍就能自己抓到</strong> —— 真正要修的是下面剩下的那几类。</p>` : '') + p.leaks.slice(0, 5).map((l, i) => `
         <div style="margin-top:.8rem">
           <div class="row" style="justify-content:space-between">
             <span><strong>${i + 1}. ${LEAK[l.leak] ?? l.leak}</strong> <span class="faint">${l.count} 次</span></span>
