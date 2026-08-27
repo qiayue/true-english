@@ -122,6 +122,9 @@ async function route(req: http.IncomingMessage, url: URL): Promise<unknown> {
     const stepM = pathname.match(/^\/api\/cards\/([\w-]+)\/steps\/(\d+)\/check$/);
     if (stepM) return api.checkStep(db, stepM[1]!, Number(stepM[2]), str(body.text, 'text'));
 
+    const delM = pathname.match(/^\/api\/cards\/([\w-]+)\/delete$/);
+    if (delM) return api.removeCard(db, delM[1]!);
+
     const doneM = pathname.match(/^\/api\/cards\/([\w-]+)\/steps\/(\d+)\/done$/);
     if (doneM) {
       return api.finishStep(db, doneM[1]!, Number(doneM[2]), {

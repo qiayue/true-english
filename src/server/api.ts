@@ -6,7 +6,7 @@ import { makeCard, review } from '../core/review.js';
 import {
   saveCard, saveAttempt, saveReview, saveComposition,
   detectReuse, chunksByFn, framesByFn, progress, stepsOf,
-  recordStep, todayView, type StepOutcome,
+  recordStep, todayView, deleteCard, type StepOutcome,
 } from '../core/store.js';
 import { wordDiff, hint, type HintLevel } from '../core/steps.js';
 import { loadConfig, publicConfig, saveConfig, clearKey, type LlmConfig } from '../core/settings.js';
@@ -255,6 +255,14 @@ export function compose(db: DatabaseSync, text: string, posted: boolean) {
   const hits = detectReuse(db, t);
   saveComposition(db, `comp_${randomUUID().slice(0, 8)}`, t, posted);
   return { hits, ok: hits.length >= 2, need: Math.max(0, 2 - hits.length) };
+}
+
+export function removeCard(db: DatabaseSync, cardId: string) {
+  try {
+    return deleteCard(db, cardId);
+  } catch (e) {
+    throw new ApiError(e instanceof Error ? e.message : '删除失败', 404);
+  }
 }
 
 export function corpus(db: DatabaseSync, fn?: string) {

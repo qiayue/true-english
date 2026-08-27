@@ -112,6 +112,49 @@ export function stepsOf(db: DatabaseSync, cardId: string) {
     .all(cardId) as unknown as { idx: number; glossZh: string; en: string }[];
 }
 
+/**
+ * 删除一张卡片及其全部衍生数据。
+ *
+ * 连坐范围包括骨架和词块 —— 因为要删的通常是「生成错了的卡」，
+ * 它的词块多半也是坏的，留着反而污染语料库。
+ *
+ * **不删 compositions**：那是学习者自己写的推文，是他的产出，
+ * 不是这张卡的衍生物。卡可以错，他写过的东西不该跟着消失。
+ */
+export function deleteCard(db: DatabaseSync, cardId: string): { deleted: Record<string, number> } {
+  const row = db.prepare('SELECT tweet_id FROM cards WHERE id = ?').get(cardId) as
+    | { tweet_id: string }
+    | undefined;
+  if (!row) throw new Error('卡片不存在');
+
+  const attemptIds = (
+    db.prepare('SELECT id FROM attempts WHERE card_id = ?').all(cardId) as unknown as { id: string }[]
+  ).map((a) => a.id);
+
+  const deleted: Record<string, number> = {};
+  const run = (label: string, sql: string, ...args: unknown[]) => {
+    const r = db.prepare(sql).run(...(args as never[]));
+    deleted[label] = Number(r.changes ?? 0);
+  };
+
+  for (const id of attemptIds) db.prepare('DELETE FROM diff_items WHERE attempt_id = ?').run(id);
+  for (const id of attemptIds) db.prepare('DELETE FROM reviews WHERE attempt_id = ?').run(id);
+  deleted['批改'] = attemptIds.length;
+
+  run('回译', 'DELETE FROM attempts WHERE card_id = ?', cardId);
+  run('练习进度', 'DELETE FROM step_progress WHERE card_id = ?', cardId);
+  run('步骤', 'DELETE FROM steps WHERE card_id = ?', cardId);
+  run('骨架', 'DELETE FROM frames WHERE card_id = ?', cardId);
+  run('词块', 'DELETE FROM chunks WHERE card_id = ?', cardId);
+  run('卡片', 'DELETE FROM cards WHERE id = ?', cardId);
+
+  // 推文只在没有别的卡片引用它时才删
+  const still = db.prepare('SELECT COUNT(*) AS n FROM cards WHERE tweet_id = ?').get(row.tweet_id) as { n: number };
+  if (still.n === 0) run('推文', 'DELETE FROM tweets WHERE id = ?', row.tweet_id);
+
+  return { deleted };
+}
+
 export function saveAttempt(db: DatabaseSync, a: Attempt): void {
   db.prepare('INSERT OR REPLACE INTO attempts (id, card_id, text, created_at) VALUES (?,?,?,?)').run(
     a.id, a.cardId, a.text, a.createdAt,

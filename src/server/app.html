@@ -108,6 +108,11 @@ pre.payload{background:var(--surface);border:1px solid var(--rule);border-radius
 .hit{border-left:3px solid var(--qing);background:var(--qing-wash);padding:.6rem .85rem;
   display:flex;flex-direction:column;gap:.3rem}
 .seam{height:1px;background:var(--rule)}
+.linkish{background:none;border:none;padding:0;font:inherit;color:var(--ink);
+  cursor:pointer;text-align:left;line-height:1.6}
+.linkish:hover{color:var(--qing)}
+.delbox{width:100%;border-top:1px dashed var(--rule);margin-top:.5rem;padding-top:.5rem}
+.link.zhu{color:var(--zhu)}
 .flabel{display:block;font-size:.82rem;font-weight:600;margin-bottom:.3rem}
 .hint{font-size:.8rem;color:var(--faint);margin-top:.3rem}
 .hint code{font-family:var(--mono);background:var(--surface-2);padding:.05em .3em;border-radius:2px}
@@ -449,12 +454,17 @@ async function loadCards() {
       $('#btn-show-all').textContent = '← 回到今天';
       $('#pick-sub').textContent = `共 ${cards.length} 张。`;
       el.innerHTML = cards.length
-        ? cards.map((c) => `<button class="item" data-id="${esc(c.id)}">
+        ? cards.map((c) => `<div class="item" style="cursor:default">
             <span class="mk">L${c.level}</span>
-            <span>${esc(c.glossZh)}<br><span class="faint" style="font-size:.8rem">${
+            <span style="flex:1"><button class="linkish" data-open="${esc(c.id)}">${esc(c.glossZh)}</button>
+              <br><span class="faint" style="font-size:.8rem">${
               c.attempts ? `<span class="qing">${Math.round(c.bestPct ?? 0)}%</span> · 练过 ${c.attempts} 次` : '未练'
-            }</span></span></button>`).join('')
+            }</span></span>
+            <button class="link zhu" data-del="${esc(c.id)}" style="flex-shrink:0">删除</button>
+          </div>`).join('')
         : '<p>还没有卡片。先去「投料」粘几条推文。</p>';
+      el.querySelectorAll('[data-open]').forEach((b) => b.onclick = () => openCard(b.dataset.open));
+      el.querySelectorAll('[data-del]').forEach((b) => b.onclick = () => confirmDelete(b.dataset.del, b));
     } else {
       const t = await call('/api/today');
       $('#pick-title').textContent = '今天';
@@ -490,6 +500,36 @@ async function loadCards() {
 }
 
 $('#btn-show-all').onclick = () => { SHOW_ALL = !SHOW_ALL; loadCards(); };
+
+/**
+ * 删除要二次确认，而且把连坐范围说清楚。
+ * 「删除」两个字底下藏着删掉骨架、词块和练习记录 —— 不说，用户
+ * 事后才发现语料库少了东西，那时候已经无法挽回。
+ */
+function confirmDelete(id, btn) {
+  const row = btn.closest('.item');
+  if (row.querySelector('.delbox')) return;
+  const box = document.createElement('div');
+  box.className = 'delbox';
+  box.innerHTML = `<span class="zhu" style="font-size:.84rem">
+      连同它的<strong>骨架、词块、练习和批改记录</strong>一起删掉，不可撤销。
+      你自己写的仿写不受影响。</span>
+    <span class="row" style="gap:.4rem;margin-top:.4rem">
+      <button class="act" data-yes="1" style="background:var(--zhu);border-color:var(--zhu)">确认删除</button>
+      <button class="link" data-no="1">算了</button></span>`;
+  row.appendChild(box);
+  box.querySelector('[data-no]').onclick = () => box.remove();
+  box.querySelector('[data-yes]').onclick = async () => {
+    try {
+      const r = await call(`/api/cards/${id}/delete`, {});
+      const what = Object.entries(r.deleted).filter(([, n]) => n > 0)
+        .map(([k, n]) => `${k} ${n}`).join('、');
+      await loadCards();
+      $('#card-list').insertAdjacentHTML('afterbegin',
+        `<div class="ok">已删除：${esc(what)}</div>`);
+    } catch (e) { showErr(box, e); }
+  };
+}
 
 let STEP = 0, HINT = 0, TRIES = 0, PHASE = 'write', COPY = false, LAST_DIFF = null;
 let USED_HINT = false;
