@@ -1,201 +1,39 @@
-import http from 'node:http';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { open } from '../core/store.js';
-import * as api from './api.js';
-import { ApiError } from './api.js';
-import { AUTH_ON, BIND_HOST, LOGIN_PAGE, isAuthed, isLockedOut, login } from './auth.js';
+/**
+ * 入口薄壳：先验 Node 版本，再动态导入真正的服务器。
+ *
+ * 为什么必须拆开：node:sqlite 需要 Node >= 22.5。在更老的版本上，
+ * `import ... from 'node:sqlite'` 在**模块链接阶段**就抛 ERR_UNKNOWN_BUILTIN_MODULE，
+ * 早于任何模块体执行 —— 所以写在顶层的版本检查根本来不及跑，
+ * 用户看到的只有一句没头没尾的 ERR_UNKNOWN_BUILTIN_MODULE。
+ * 用动态 import() 把链接推迟到检查之后，才能给出人话错误。
+ */
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const HTML = path.join(here, 'app.html');
+// node:sqlite 目前是实验特性，每次启动都打一行警告。
+// 这是我们主动选择的依赖，不是意外，没必要每次都吓用户一跳。
+const warn = process.emitWarning;
+process.emitWarning = ((msg: unknown, ...rest: unknown[]) => {
+  if (typeof msg === 'string' && msg.includes('SQLite is an experimental feature')) return;
+  return (warn as (...a: unknown[]) => void)(msg, ...rest);
+}) as typeof process.emitWarning;
 
-const PORT = Number(process.env.PORT ?? 5173);
-const DB_FILE = process.env.TRUE_ENGLISH_DB ?? 'data/true-english.db';
-const db = open(DB_FILE);
+const [major = 0, minor = 0] = process.versions.node.split('.').map(Number);
+const ok = major > 22 || (major === 22 && minor >= 5);
 
-function readRaw(req: http.IncomingMessage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    let size = 0;
-    req.on('data', (c: Buffer) => {
-      size += c.length;
-      if (size > 2_000_000) {
-        reject(new ApiError('请求过大', 413));
-        req.destroy();
-        return;
-      }
-      chunks.push(c);
-    });
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
-    req.on('error', reject);
-  });
+if (!ok) {
+  console.error(`
+  Node 版本太低：当前 ${process.versions.node}，需要 22.5 或更高。
+
+  这个项目用 Node 内置的 node:sqlite 存数据（好处是零原生依赖，
+  不用编译 better-sqlite3），但它是 22.5 才加进来的。
+
+  升级方式：
+    nvm install 22 && nvm use 22        （用 nvm）
+    brew install node@22                 （macOS + Homebrew）
+    https://nodejs.org                   （直接下载 LTS）
+`);
+  process.exit(1);
 }
 
-function readBody(req: http.IncomingMessage): Promise<Record<string, unknown>> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    let size = 0;
-    req.on('data', (c: Buffer) => {
-      size += c.length;
-      if (size > 2_000_000) {
-        reject(new ApiError('请求过大', 413));
-        req.destroy();
-        return;
-      }
-      chunks.push(c);
-    });
-    req.on('end', () => {
-      const raw = Buffer.concat(chunks).toString('utf8');
-      if (!raw) return resolve({});
-      try {
-        resolve(JSON.parse(raw) as Record<string, unknown>);
-      } catch {
-        reject(new ApiError('请求体不是合法 JSON'));
-      }
-    });
-    req.on('error', reject);
-  });
-}
+await import('./serve.js');
 
-function str(v: unknown, field: string): string {
-  if (typeof v !== 'string') throw new ApiError(`缺少字段 ${field}`);
-  return v;
-}
-function strArray(v: unknown, field: string): string[] {
-  if (!Array.isArray(v) || v.some((x) => typeof x !== 'string')) {
-    throw new ApiError(`字段 ${field} 必须是字符串数组`);
-  }
-  return v as string[];
-}
-
-async function route(req: http.IncomingMessage, url: URL): Promise<unknown> {
-  const { pathname } = url;
-  const m = req.method ?? 'GET';
-
-  if (m === 'GET' && pathname === '/api/health') {
-    return { hasKey: api.hasCredentials(), db: DB_FILE };
-  }
-  if (m === 'GET' && pathname === '/api/cards') return { cards: api.listCards(db) };
-  if (m === 'GET' && pathname === '/api/corpus') {
-    return api.corpus(db, url.searchParams.get('fn') ?? undefined);
-  }
-  if (m === 'GET' && pathname === '/api/progress') return api.report(db);
-
-  const practice = pathname.match(/^\/api\/cards\/([\w-]+)\/practice$/);
-  if (m === 'GET' && practice) return api.practiceCard(db, practice[1]!);
-
-  if (m === 'POST') {
-    const body = await readBody(req);
-
-    if (pathname === '/api/ingest') return { tweets: api.ingest(str(body.text, 'text')) };
-
-    if (pathname === '/api/cards/request') return api.cardRequest(strArray(body.texts, 'texts'));
-    if (pathname === '/api/cards/import') {
-      return { cards: api.importCards(db, strArray(body.texts, 'texts'), str(body.json, 'json')) };
-    }
-    if (pathname === '/api/cards/auto') {
-      const texts = strArray(body.texts, 'texts');
-      const cards = [];
-      for (const t of texts) cards.push(await api.createCard(db, t));
-      return { cards };
-    }
-
-    const grade = pathname.match(/^\/api\/cards\/([\w-]+)\/grade-request$/);
-    if (grade) return api.gradingRequest(db, grade[1]!, str(body.attempt, 'attempt'));
-
-    const auto = pathname.match(/^\/api\/cards\/([\w-]+)\/review$/);
-    if (auto) return api.submitAttempt(db, auto[1]!, str(body.attempt, 'attempt'));
-
-    if (pathname === '/api/reviews/import') {
-      return api.importReview(db, str(body.cardId, 'cardId'), str(body.attempt, 'attempt'), str(body.json, 'json'));
-    }
-
-    if (pathname === '/api/compose') {
-      return api.compose(db, str(body.text, 'text'), body.posted === true);
-    }
-  }
-
-  throw new ApiError('没有这个接口', 404);
-}
-
-function sendHtml(res: http.ServerResponse, body: string, status = 200, extra: Record<string, string> = {}) {
-  res.writeHead(status, { 'content-type': 'text/html; charset=utf-8', ...extra });
-  res.end(body);
-}
-
-const server = http.createServer((req, res) => {
-  const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
-
-  // —— 登录 ——
-  if (AUTH_ON && url.pathname === '/login') {
-    if (req.method === 'GET') {
-      sendHtml(res, LOGIN_PAGE.replace('__ERR__', ''));
-      return;
-    }
-    if (req.method === 'POST') {
-      if (isLockedOut(req)) {
-        sendHtml(res, LOGIN_PAGE.replace('__ERR__', '尝试太多次了，15 分钟后再试。'), 429);
-        return;
-      }
-      void readRaw(req)
-        .then((raw) => {
-          const token = new URLSearchParams(raw).get('token') ?? '';
-          const cookie = login(req, token);
-          if (!cookie) {
-            sendHtml(res, LOGIN_PAGE.replace('__ERR__', '口令不对。'), 401);
-            return;
-          }
-          res.writeHead(303, { location: '/', 'set-cookie': cookie });
-          res.end();
-        })
-        .catch(() => sendHtml(res, LOGIN_PAGE.replace('__ERR__', '出错了，重试一下。'), 400));
-      return;
-    }
-  }
-
-  // —— 鉴权闸门：页面和 API 都走这里 ——
-  if (!isAuthed(req)) {
-    if (url.pathname.startsWith('/api/')) {
-      res.writeHead(401, { 'content-type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ error: '未登录' }));
-    } else {
-      res.writeHead(303, { location: '/login' });
-      res.end();
-    }
-    return;
-  }
-
-  if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
-    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-    fs.createReadStream(HTML).pipe(res);
-    return;
-  }
-
-  void route(req, url)
-    .then((data) => {
-      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify(data));
-    })
-    .catch((e: unknown) => {
-      const status = e instanceof ApiError ? e.status : 500;
-      const message = e instanceof Error ? e.message : String(e);
-      if (status === 500) console.error(e);
-      res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ error: message }));
-    });
-});
-
-server.listen(PORT, BIND_HOST, () => {
-  const mode = api.hasCredentials() ? '自动批改' : '手工批改（未检测到 API key）';
-  console.log(`\n  true-english  ·  ${mode}`);
-  console.log(`  http://localhost:${PORT}`);
-  console.log(`  数据库 ${DB_FILE}`);
-  if (AUTH_ON) {
-    console.log(`  鉴权 已开启，监听 ${BIND_HOST}`);
-  } else {
-    console.log(`  鉴权 未开启 —— 只监听 127.0.0.1，公网访问不到`);
-    console.log(`       要部署到公网，先设 TRUE_ENGLISH_TOKEN`);
-  }
-  console.log('');
-});
+export {};
