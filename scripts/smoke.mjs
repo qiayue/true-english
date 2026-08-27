@@ -57,13 +57,23 @@ check('投料筛选', (await p.textContent('#ingest-hint')).includes('1/2'));
 check('导出卡片请求', await p.click('#btn-card-manual').then(() => p.waitForTimeout(400))
   .then(async () => (await p.textContent('#card-payload')).length > 100));
 
-// ── 练习：阶梯 ──
-await p.click('nav button[data-tab="practice"]'); await p.waitForTimeout(600);
-const cards = await p.$$('#card-list .item');
-check('卡片列表非空', cards.length > 0);
-let target = cards[0];
-for (const c of cards) if ((await c.innerText()).includes('L4')) { target = c; break; }
-await target.click(); await p.waitForTimeout(400);
+// ── 今日队列 ──
+await p.click('nav button[data-tab="practice"]'); await p.waitForTimeout(700);
+check('练习页落在「今天」', (await p.textContent('#pick-title')).includes('今天'));
+check('今日队列有新卡', (await p.textContent('#pick-sub')).includes('新卡'),
+  await p.textContent('#pick-sub'));
+await p.click('#btn-show-all'); await p.waitForTimeout(500);
+check('可切到全部卡片', (await p.textContent('#pick-title')).includes('全部'));
+await p.click('#btn-show-all'); await p.waitForTimeout(500);
+
+// 用 locator 而不是 $$ 拿到的句柄：loadCards 是异步的，
+// 列表重渲染后旧句柄指向已被替换的节点，点它等于没点。
+// locator 在点击那一刻才解析，天然躲开这个竞态。
+const list = p.locator('#card-list .item');
+await list.first().waitFor({ state: 'visible', timeout: 10_000 });
+check('卡片列表非空', (await list.count()) > 0);
+await list.first().click();
+await p.locator('#step-input').waitFor({ state: 'visible', timeout: 10_000 });
 
 for (let i = 0; i < STEP_ANSWERS.length; i++) {
   await p.fill('#step-input', STEP_ANSWERS[i]);
@@ -118,7 +128,13 @@ check('存档后给下一步出口', await p.isVisible('#btn-next-card') || arch
 
 // ── 换一张 ──
 await p.click('#btn-back'); await p.waitForTimeout(500);
-check('换一张回到列表', await p.isVisible('#card-list'));
+check('换一张回到列表', await p.isVisible('#pick'));
+// 练完之后队列应该把它标成复习
+const subAfter = await p.textContent('#pick-sub');
+check('练完后给出完成状态而非空状态',
+  subAfter.includes('今天练完了') || subAfter.includes('复习'), subAfter.slice(0, 40));
+
+
 
 // ── 语料库 ──
 await p.click('nav button[data-tab="corpus"]'); await p.waitForTimeout(600);

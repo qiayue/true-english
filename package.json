@@ -17,8 +17,9 @@
     "seed:example": "node scripts/seed-example.mjs",
     "shot": "node scripts/screenshot.mjs",
     "start": "tsx src/server/index.ts",
-    "check": "node scripts/check-ui.mjs && tsc --noEmit",
-    "smoke": "node scripts/smoke.mjs"
+    "check": "node scripts/check-ui.mjs && tsc --noEmit && tsx tests/schedule.ts",
+    "smoke": "node scripts/smoke.mjs",
+    "test": "tsx tests/schedule.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.121.0",

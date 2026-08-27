@@ -178,8 +178,11 @@ pre.payload{background:var(--surface);border:1px solid var(--rule);border-radius
 <!-- ─────────── 练习 ─────────── -->
 <section class="panel" id="p-practice">
   <div id="pick">
-    <h2>选一张卡片</h2>
-    <p>练习时只给你看中文。英文原文在服务端，提交前不会发到浏览器 —— 偷看的成本不是零，这是故意的。</p>
+    <div class="row" style="justify-content:space-between;align-items:baseline">
+      <h2 id="pick-title">今天</h2>
+      <button class="link" id="btn-show-all">看全部卡片</button>
+    </div>
+    <p id="pick-sub">练习时只给你看中文。英文原文在服务端，提交前不会发到浏览器 —— 偷看的成本不是零，这是故意的。</p>
     <div id="card-list" class="list" style="margin-top:.9rem"></div>
   </div>
 
@@ -355,26 +358,68 @@ $('#btn-import-card').onclick = async () => {
 
 // ── 练习 ──
 let CARD = null, PENDING = null;
+let SHOW_ALL = false;
+
+/**
+ * 练习页的落地内容：**今日队列**，不是一堆卡片。
+ *
+ * 方法论里「回译重合度从 40% 涨到 70%」是核心指标，
+ * 而重合度上升只能靠重复同一批材料 —— 一直喂新卡，
+ * 重合度永远停在第一次的水平。所以到期复习排在新卡前面。
+ */
 async function loadCards() {
   const el = $('#card-list');
   try {
-    const { cards } = await call('/api/cards');
-    if (!cards.length) {
-      el.innerHTML = '<p>还没有卡片。先去「投料」粘几条推文。</p>'; return;
+    if (SHOW_ALL) {
+      const { cards } = await call('/api/cards');
+      $('#pick-title').textContent = '全部卡片';
+      $('#btn-show-all').textContent = '← 回到今天';
+      $('#pick-sub').textContent = `共 ${cards.length} 张。`;
+      el.innerHTML = cards.length
+        ? cards.map((c) => `<button class="item" data-id="${esc(c.id)}">
+            <span class="mk">L${c.level}</span>
+            <span>${esc(c.glossZh)}<br><span class="faint" style="font-size:.8rem">${
+              c.attempts ? `<span class="qing">${Math.round(c.bestPct ?? 0)}%</span> · 练过 ${c.attempts} 次` : '未练'
+            }</span></span></button>`).join('')
+        : '<p>还没有卡片。先去「投料」粘几条推文。</p>';
+    } else {
+      const t = await call('/api/today');
+      $('#pick-title').textContent = '今天';
+      $('#btn-show-all').textContent = '看全部卡片';
+      if (t.items.length) {
+        $('#pick-sub').innerHTML =
+          `<span class="zhu">复习 ${t.review} 张</span>　<span class="faint">新卡 ${t.fresh} 张</span>　` +
+          `<span class="faint">复习排在前面 —— 重合度只能靠重复同一批材料涨上去。</span>`;
+      } else if (t.cleared) {
+        // 练完了是成就，不是空状态。把它和「还没有卡片」区分开。
+        const hrs = t.nextDueAt
+          ? Math.max(1, Math.round((new Date(t.nextDueAt) - Date.now()) / 3600000)) : null;
+        $('#pick-sub').innerHTML =
+          `<span class="qing"><strong>今天练完了。</strong></span>　` +
+          (hrs ? `<span class="faint">下一批复习在 ${hrs} 小时后。</span>　` : '') +
+          `<span class="faint">别加练 —— 每天一条吃透，比十条走马观花有用。</span>`;
+      } else {
+        $('#pick-sub').textContent = '还没有卡片。先去「投料」粘几条推文。';
+      }
+      el.innerHTML = t.items.map((i) => {
+        const tag = i.kind === 'review'
+          ? `<span class="mk zhu">复习</span>`
+          : `<span class="mk qing">新</span>`;
+        const sub = i.kind === 'review'
+          ? `${i.dueSteps}/${i.totalSteps} 步到期${i.weakestBox === 0 ? ' · <span class="zhu">上次卡住了</span>' : ''}`
+          : `${i.totalSteps} 步，没练过`;
+        return `<button class="item" data-id="${esc(i.cardId)}">${tag}
+          <span>${esc(i.glossZh)}<br><span class="faint" style="font-size:.8rem">${sub}</span></span></button>`;
+      }).join('');
     }
-    el.innerHTML = cards.map((c) => {
-      const done = c.attempts > 0
-        ? `<span class="qing">${Math.round(c.bestPct ?? 0)}%</span>`
-        : '<span class="faint">未练</span>';
-      return `<button class="item" data-id="${esc(c.id)}">
-        <span class="mk">L${c.level}</span>
-        <span>${esc(c.glossZh)}<br><span class="faint" style="font-size:.8rem">${done}${c.attempts ? ` · 练过 ${c.attempts} 次` : ''}</span></span>
-      </button>`;
-    }).join('');
     el.querySelectorAll('.item').forEach((b) => b.onclick = () => openCard(b.dataset.id));
   } catch (e) { showErr(el, e); }
 }
+
+$('#btn-show-all').onclick = () => { SHOW_ALL = !SHOW_ALL; loadCards(); };
+
 let STEP = 0, HINT = 0, TRIES = 0, PHASE = 'write', COPY = false, LAST_DIFF = null;
+let USED_HINT = false;
 let DONE_EN = [];   // 已完成步骤的原文，用作后续步骤的上文语境
 
 async function openCard(id) {
@@ -465,7 +510,7 @@ function hideAnswer() {
 function renderStep() {
   const steps = CARD.steps;
   STEP = Math.min(STEP, steps.length - 1);
-  HINT = 0; TRIES = 0; COPY = false; LAST_DIFF = null;
+  HINT = 0; TRIES = 0; COPY = false; LAST_DIFF = null; USED_HINT = false;
   $('#step-dots').innerHTML = steps.map((_, i) =>
     `<span class="dot ${i < STEP ? 'done' : i === STEP ? 'cur' : ''}"></span>`).join('');
   // 前面步骤的原文接起来当上文。这些你已经看过，不构成泄漏，
@@ -515,6 +560,7 @@ async function doCheck() {
       $('#step-out').innerHTML = `<div class="hit">
         <span class="qing"><strong>✓ 写对了</strong>${TRIES > 1 ? ` <span class="tries">练了 ${TRIES} 次</span>` : ''}</span>
         <span class="mono qing">${esc(d.en)}</span></div>`;
+      void reportStep({ tries: TRIES, hinted: USED_HINT, copied: COPY, accepted: false });
       setPhase('hit');
     } else {
       LAST_DIFF = d;
@@ -553,9 +599,19 @@ document.addEventListener('keydown', (e) => {
  * 强按着他改成原文就是错误的教学 —— 所以必须留这个出口。
  * 真正的判定在最后写整条时由完整批改给出。
  */
+/**
+ * 上报这一步的练习结果。失败不打扰用户 —— 间隔重复是锦上添花，
+ * 网络抖一下不该把人从练习里踢出来。
+ */
+async function reportStep(outcome) {
+  try { await call(`/api/cards/${CARD.id}/steps/${STEP}/done`, outcome); }
+  catch { /* 静默 */ }
+}
+
 $('#btn-step-accept').onclick = () => {
   $('#step-out').innerHTML += `<p class="faint" style="font-size:.82rem;margin-top:.4rem">
     已跳过。这处到底算不算对，最后写整条时的批改会给出判定。</p>`;
+  void reportStep({ tries: TRIES, hinted: USED_HINT, copied: COPY, accepted: true });
   setPhase('hit');
 };
 
@@ -573,6 +629,7 @@ $('#btn-step-copy').onclick = async () => {
 };
 
 $('#btn-step-hint').onclick = async () => {
+  USED_HINT = true;
   HINT = Math.min(3, HINT + 1);
   try {
     const h = await call(`/api/cards/${CARD.id}/steps/${STEP}/hint?level=${HINT}`);

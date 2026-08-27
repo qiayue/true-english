@@ -5,6 +5,7 @@ import { makeCard, review } from '../core/review.js';
 import {
   saveCard, saveAttempt, saveReview, saveComposition,
   detectReuse, chunksByFn, framesByFn, progress, stepsOf,
+  recordStep, todayView, type StepOutcome,
 } from '../core/store.js';
 import { wordDiff, hint, type HintLevel } from '../core/steps.js';
 import { FUNCTIONS, type Fn } from '../core/taxonomy.js';
@@ -120,6 +121,26 @@ export function checkStep(db: DatabaseSync, cardId: string, idx: number, text: s
   if (!t) throw new ApiError('这一步还没写');
   const d = wordDiff(t, st.en);
   return { idx, en: st.en, ...d };
+}
+
+/** 一步练成了，记进度并算出下次该什么时候回来 */
+export function finishStep(db: DatabaseSync, cardId: string, idx: number, o: Partial<StepOutcome>) {
+  stepAt(db, cardId, idx); // 不存在就报 404
+  return recordStep(db, cardId, idx, {
+    tries: Math.max(1, Number(o.tries ?? 1)),
+    hinted: !!o.hinted,
+    copied: !!o.copied,
+    accepted: !!o.accepted,
+  });
+}
+
+export function todayQueue(db: DatabaseSync) {
+  const v = todayView(db);
+  return {
+    ...v,
+    review: v.items.filter((i) => i.kind === 'review').length,
+    fresh: v.items.filter((i) => i.kind === 'new').length,
+  };
 }
 
 export function stepHint(db: DatabaseSync, cardId: string, idx: number, level: number) {
