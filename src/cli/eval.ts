@@ -7,7 +7,7 @@ import './silence.js';
  *   2. **该用哪个模型** —— 同一套用例分别跑几个模型，让数字说话，
  *      不要拿单个翻译样本的观感做决定（知道价格再看质量，人是有偏的）
  *
- *   pnpm eval                                        用设置里配的模型
+ *   pnpm eval                                        用设置里的批改模型（没单配就是默认模型）
  *   pnpm eval -- --model anthropic/claude-sonnet-4.5 临时换一个模型
  *   pnpm eval -- --model a,b,c                       几个模型逐个跑，最后出对比表
  *   pnpm eval -- --only <case-id> --verbose
@@ -17,7 +17,7 @@ import { review } from '../core/review.js';
 import type { ReviewOut } from '../core/schema.js';
 import { C } from './render.js';
 import { parseArgs, die } from './args.js';
-import { loadConfig } from '../core/settings.js';
+import { loadConfig, configFor } from '../core/settings.js';
 import { open, DEFAULT_DB } from '../core/store.js';
 import { ConfigError, type Usage } from '../core/llm.js';
 
@@ -73,12 +73,15 @@ function check(c: Case, r: ReviewOut): { fails: string[]; warns: string[] } {
 // ─────────────────────────────────────────────
 
 const args = parseArgs(process.argv.slice(2));
-const CONFIG = loadConfig(open(typeof args.db === 'string' ? args.db : DEFAULT_DB));
+const db = open(typeof args.db === 'string' ? args.db : DEFAULT_DB);
+const CONFIG = loadConfig(db);
+// 评测评的是批改，所以默认用「批改模型」（没单独配就是默认模型）
+const REVIEW_MODEL = configFor(db, 'review').model;
 const cases: Case[] = JSON.parse(fs.readFileSync('evals/cases.json', 'utf8'));
 const todo = typeof args.only === 'string' ? cases.filter((c) => c.id === args.only) : cases;
 if (todo.length === 0) die(`没有匹配的用例：${args.only}`);
 
-const models = (typeof args.model === 'string' ? args.model.split(',') : [CONFIG.model])
+const models = (typeof args.model === 'string' ? args.model.split(',') : [REVIEW_MODEL])
   .map((m) => m.trim())
   .filter(Boolean);
 if (models.length === 0) {

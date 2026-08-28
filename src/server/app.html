@@ -332,10 +332,28 @@ textarea:disabled{background:var(--paper);color:var(--faint);cursor:default;bord
     </div>
 
     <div>
-      <label class="flabel" for="set-model">模型 ID</label>
-      <input id="set-model" placeholder="anthropic/claude-sonnet-4.5">
-      <div class="row" style="margin-top:.45rem">
-        <button class="link" id="btn-fetch-models">拉取这个端点上的模型列表</button>
+      <label class="flabel" for="set-model">默认模型</label>
+      <input id="set-model" placeholder="anthropic/claude-sonnet-4.5" data-mlabel="默认模型">
+      <p class="hint">下面两项哪个留空，就用它。</p>
+    </div>
+
+    <div>
+      <label class="flabel" for="set-model-review">批改模型 <span class="faint" style="font-weight:400">可选</span></label>
+      <input id="set-model-review" placeholder="留空 = 用默认模型" data-mlabel="批改模型">
+      <p class="hint">每天跑得最多的调用。任务被 prompt 和 schema 锁得很死，中档模型往往够 ——
+        用 <code>npm run eval -- --model a,b</code> 量过再定，别猜。</p>
+    </div>
+
+    <div>
+      <label class="flabel" for="set-model-card">卡片生成模型 <span class="faint" style="font-weight:400">可选</span></label>
+      <input id="set-model-card" placeholder="留空 = 用默认模型" data-mlabel="卡片生成模型">
+      <p class="hint">一张卡只生成一次，但坏的拆步、坏的词块会污染之后好几天的练习 —— 这里值得用贵的。</p>
+    </div>
+
+    <div>
+      <div class="row" style="justify-content:space-between">
+        <span class="flabel" style="margin:0">模型列表</span>
+        <button class="link" id="btn-fetch-models">强制刷新模型列表</button>
       </div>
       <div id="model-list"></div>
     </div>
@@ -1689,6 +1707,9 @@ async function loadSettings() {
     const c = await call('/api/settings');
     $('#set-base').value = c.baseUrl ?? '';
     $('#set-model').value = c.model ?? '';
+    $('#set-model-review').value = c.modelReview ?? '';
+    $('#set-model-card').value = c.modelCard ?? '';
+    void loadCachedModels();
     // key 只写不读：服务端从不回传它，这里只显示有没有、大概长什么样
     $('#set-key').value = '';
     $('#key-hint').innerHTML = c.hasKey
@@ -1704,11 +1725,13 @@ $('#btn-save-settings').onclick = async () => {
       baseUrl: $('#set-base').value.trim(),
       apiKey: $('#set-key').value.trim(),
       model: $('#set-model').value.trim(),
+      modelReview: $('#set-model-review').value.trim(),
+      modelCard: $('#set-model-card').value.trim(),
     });
+    const missing = [c.hasKey ? null : 'API Key', c.model ? null : '默认模型'].filter(Boolean);
     out.innerHTML = c.ready
       ? '<div class="ok">保存好了。建议点一下「测试连接」确认真的能通。</div>'
-      : '<div class="err">保存了，但还差东西：' +
-        (c.hasKey ? '' : 'API Key ') + (c.model ? '' : '模型 ID ') + '没填。</div>';
+      : `<div class="err">保存了，但「${missing.join('」和「')}」还没填。</div>`;
     await loadSettings();
     await refreshMode();
   } catch (e) { showErr(out, e); }
@@ -1732,35 +1755,72 @@ $('#btn-clear-key').onclick = async () => {
   catch (e) { showErr($('#settings-out'), e); }
 };
 
+// 三个模型输入框共用一份列表。点列表里的一行，填进**最后碰过的那个框** ——
+// 每行摆三个「填到这里」的小按钮的话，300 行就是 900 个按钮。
+let MODEL_TARGET = '#set-model';
+let MODELS_AT = null;   // 列表缓存于何时
+
+const MODEL_INPUTS = ['#set-model', '#set-model-review', '#set-model-card'];
+for (const sel of MODEL_INPUTS) {
+  $(sel).addEventListener('focus', () => { MODEL_TARGET = sel; if (MODELS.length) renderModels($(sel).value); });
+  $(sel).addEventListener('input', () => { if (MODELS.length) renderModels($(sel).value); });
+}
+
+function adoptModels(r) {
+  MODELS = r.models;
+  MODELS_AT = r.cachedAt;
+  // 支持结构化输出的排前面：不支持也能用（会降级成把 schema 写进 prompt），
+  // 但支持的更稳，值得让用户一眼看见。
+  MODELS.sort((a, b) => (b.structured ? 1 : 0) - (a.structured ? 1 : 0) || a.id.localeCompare(b.id));
+}
+
+/**
+ * 列表拉一次就缓存在服务端（跟着 API 地址走，换端点自动作废）。
+ * 打开设置页读缓存，不碰网络 —— 断网时设置页照样能用；
+ * 想要最新的就点「强制刷新」。
+ */
+async function loadCachedModels() {
+  try {
+    const r = await call('/api/settings/models');
+    if (r.models.length) { adoptModels(r); renderModels(''); }
+    else $('#model-list').innerHTML =
+      '<p class="hint">还没拉取过。点右上角「强制刷新模型列表」从端点拉一次，之后就用缓存。</p>';
+  } catch { /* 列表只是辅助，拿不到不打扰 */ }
+}
+
 $('#btn-fetch-models').onclick = async () => {
   const out = $('#model-list');
   out.innerHTML = '<p class="hint">拉取中…</p>';
   try {
-    const r = await call('/api/settings/models', {});
-    MODELS = r.models;
-    // 支持结构化输出的排前面：不支持也能用（会降级成把 schema 写进 prompt），
-    // 但支持的更稳，值得让用户一眼看见。
-    MODELS.sort((a, b) => (b.structured ? 1 : 0) - (a.structured ? 1 : 0) || a.id.localeCompare(b.id));
+    adoptModels(await call('/api/settings/models', {}));
     renderModels('');
   } catch (e) { showErr(out, e); }
 };
 
+function ago(iso) {
+  if (!iso) return '';
+  const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  return m < 2 ? '刚刚' : m < 60 ? `${m} 分钟前` : m < 60 * 48 ? `${Math.round(m / 60)} 小时前` : `${Math.round(m / 1440)} 天前`;
+}
+
 function renderModels(filter) {
   const out = $('#model-list');
-  const f = filter.trim().toLowerCase();
+  const f = (filter ?? '').trim().toLowerCase();
   const hit = MODELS.filter((m) => !f || m.id.toLowerCase().includes(f)).slice(0, 60);
+  const target = $(MODEL_TARGET)?.dataset.mlabel ?? '默认模型';
   out.innerHTML =
-    `<p class="hint">共 ${MODELS.length} 个，<span class="qing">带 ✓ 的原生支持结构化输出</span>，
-      其余会降级成把 schema 写进 prompt（也能用，稳定性差一点）。在上面的输入框里打字可以筛选。</p>
+    `<p class="hint">共 ${MODELS.length} 个${MODELS_AT ? `（缓存于 ${ago(MODELS_AT)}）` : ''}，
+      <span class="qing">带 ✓ 的原生支持结构化输出</span>，其余会降级成把 schema 写进 prompt。
+      点一行填进<b>「${esc(target)}」</b>；在输入框里打字可筛选。</p>
      <div class="mlist">${hit.map((m) => `<button class="mrow" data-id="${esc(m.id)}">
        <span>${esc(m.id)}</span>${m.structured ? '<em>✓ 结构化</em>' : ''}</button>`).join('')}</div>`;
   out.querySelectorAll('.mrow').forEach((b) => b.onclick = () => {
-    $('#set-model').value = b.dataset.id;
-    out.innerHTML = '<p class="hint">选好了，记得点「保存」。</p>';
+    const inp = $(MODEL_TARGET);
+    inp.value = b.dataset.id;
+    $('#settings-out').innerHTML =
+      `<p class="hint">「${esc(inp.dataset.mlabel)}」= <span class="mono">${esc(b.dataset.id)}</span>，记得点「保存」。</p>`;
   });
 }
-
-$('#set-model').addEventListener('input', () => { if (MODELS.length) renderModels($('#set-model').value); });
 
 async function refreshMode() {
   const h = await call('/api/health');

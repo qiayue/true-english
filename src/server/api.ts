@@ -12,7 +12,10 @@ import {
   type StepOutcome,
 } from '../core/store.js';
 import { wordDiff, hint, type HintLevel } from '../core/steps.js';
-import { loadConfig, publicConfig, saveConfig, clearKey, type LlmConfig } from '../core/settings.js';
+import {
+  loadConfig, configFor, publicConfig, saveConfig, clearKey,
+  saveModelCache, loadModelCache, type SettingsPatch,
+} from '../core/settings.js';
 import { planToday, stageForBox, weakLeaks, STAGE_ZH, STAGE_HINT, STAGES, type Stage } from '../core/plan.js';
 import { makeCloze, checkCloze } from '../core/cloze.js';
 import { ping } from '../core/llm.js';
@@ -37,7 +40,7 @@ export function getSettings(db: DatabaseSync) {
   return publicConfig(db);
 }
 
-export function putSettings(db: DatabaseSync, patch: Partial<LlmConfig>) {
+export function putSettings(db: DatabaseSync, patch: SettingsPatch) {
   if (patch.baseUrl !== undefined && patch.baseUrl && !/^https?:\/\//.test(patch.baseUrl)) {
     throw new ApiError('API 地址要以 http:// 或 https:// 开头');
   }
@@ -73,6 +76,7 @@ export async function listModels(db: DatabaseSync) {
   if (!/^https?:\/\//.test(c.baseUrl)) throw new ApiError('API 地址不对');
   const res = await fetch(`${c.baseUrl}/models`, {
     headers: c.apiKey ? { authorization: `Bearer ${c.apiKey}` } : {},
+    signal: AbortSignal.timeout(30_000),
   });
   if (!res.ok) throw new ApiError(`拉取模型列表失败：${res.status} ${res.statusText}`);
   const json = (await res.json()) as {
@@ -85,7 +89,18 @@ export async function listModels(db: DatabaseSync) {
       name: m.name ?? m.id!,
       structured: (m.supported_parameters ?? []).includes('structured_outputs'),
     }));
-  return { models, total: models.length };
+  // 拉一次就存起来，之后打开设置页直接用缓存 —— 见 settings.ts 里的说明
+  saveModelCache(db, c.baseUrl, models);
+  return { models, total: models.length, cachedAt: new Date().toISOString() };
+}
+
+/** 只读缓存，不碰网络。打开设置页时用它，「强制刷新」才走 listModels。 */
+export function cachedModels(db: DatabaseSync) {
+  const c = loadConfig(db);
+  const hit = loadModelCache(db, c.baseUrl);
+  return hit
+    ? { models: hit.models, total: hit.models.length, cachedAt: hit.cachedAt }
+    : { models: [], total: 0, cachedAt: null };
 }
 
 /**
@@ -139,7 +154,7 @@ function rescoreAll(db: DatabaseSync, texts: string[]) {
 export async function createCard(db: DatabaseSync, text: string, author?: string): Promise<Card> {
   const card = await makeCard(
     { id: randomUUID().slice(0, 8), text, author, capturedAt: new Date().toISOString() },
-    loadConfig(db),
+    configFor(db, 'card'),
     knownWords(db),
   );
   saveCard(db, card);
@@ -310,7 +325,7 @@ export async function submitAttempt(db: DatabaseSync, cardId: string, attemptTex
 
   const r = await review(
     { original: card.original, attempt: text, glossZh: card.glossZh },
-    loadConfig(db),
+    configFor(db, 'review'),
   );
   saveReview(db, attemptId, r);
 
@@ -634,7 +649,7 @@ export async function submitComposition(
 
   const r = await reviewComposition(
     { text: t, chunks: composeChunkContext(db) },
-    loadConfig(db),
+    configFor(db, 'review'),
   );
   return persistComposition(db, t, posted, r, compId);
 }

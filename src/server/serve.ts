@@ -77,6 +77,7 @@ async function route(req: http.IncomingMessage, url: URL): Promise<unknown> {
     return { hasKey: api.hasCredentials(db), db: DB_FILE };
   }
   if (m === 'GET' && pathname === '/api/settings') return api.getSettings(db);
+  if (m === 'GET' && pathname === '/api/settings/models') return api.cachedModels(db);
   if (m === 'GET' && pathname === '/api/cards') return { cards: api.listCards(db) };
   if (m === 'GET' && pathname === '/api/corpus') {
     return api.corpus(db, url.searchParams.get('fn') ?? undefined);
@@ -118,6 +119,8 @@ async function route(req: http.IncomingMessage, url: URL): Promise<unknown> {
         ...(typeof body.baseUrl === 'string' ? { baseUrl: body.baseUrl } : {}),
         ...(typeof body.apiKey === 'string' ? { apiKey: body.apiKey } : {}),
         ...(typeof body.model === 'string' ? { model: body.model } : {}),
+        ...(typeof body.modelReview === 'string' ? { modelReview: body.modelReview } : {}),
+        ...(typeof body.modelCard === 'string' ? { modelCard: body.modelCard } : {}),
       });
     }
     if (pathname === '/api/settings/test') return api.testSettings(db);

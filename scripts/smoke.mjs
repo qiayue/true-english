@@ -405,6 +405,15 @@ await p.click('nav button[data-tab="corpus"]'); await p.waitForTimeout(600);
 check('语料库列出词块', (await p.textContent('#corpus-out')).includes('词块'));
 
 // ── 报告 ──
+// ── 设置页：三个模型槽 + 缓存列表的空状态 ──
+await p.click('nav button[data-tab="settings"]'); await p.waitForTimeout(600);
+check('设置页有三个模型槽',
+  (await p.isVisible('#set-model')) && (await p.isVisible('#set-model-review')) &&
+  (await p.isVisible('#set-model-card')));
+check('没有缓存时引导去强制刷新',
+  (await p.textContent('#model-list')).includes('强制刷新'),
+  (await p.textContent('#model-list')).slice(0, 50));
+
 await p.click('nav button[data-tab="report"]'); await p.waitForTimeout(700);
 const rep = await p.textContent('#report-out');
 check('报告有数据', rep.includes('回译') && rep.includes('错误模式'), rep.slice(0, 60));
