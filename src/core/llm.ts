@@ -24,16 +24,29 @@ export class LlmError extends Error {
   }
 }
 
+/** 一次 HTTP 调用的用量。cost 只有 OpenRouter 会给（美元）。 */
+export interface Usage {
+  prompt: number;
+  completion: number;
+  cost?: number;
+}
+
 export interface CompleteOptions {
   system: string;
   user: string;
   maxTokens?: number;
   /** 结构化输出失败后重试几次 */
   retries?: number;
+  /**
+   * 每次真实 HTTP 调用的用量回调。注意是**每次调用**：降级和重试
+   * 也会各自触发一次 —— 那些也是花出去的钱，评测算成本时不能漏。
+   */
+  onUsage?: (u: Usage) => void;
 }
 
 interface ChatResponse {
   choices?: { message?: { content?: string | null }; finish_reason?: string }[];
+  usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: number };
   error?: { message?: string; code?: string | number };
 }
 
@@ -61,30 +74,65 @@ function extractJson(raw: string): unknown {
   }
 }
 
+/** 默认三分钟。批改一条推文远用不了这么久 —— 超过它基本是端点挂了。 */
+const DEFAULT_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS ?? 180_000);
+
+/**
+ * 空响应单独立一类，因为它值得**自动重试一次**：
+ * 上游打嗝、推理型模型把预算烧在思考上，都会给回一个 200 但正文为空 ——
+ * 这类失败重试一次多半就过了，直接判死会把一次网络抖动变成「批改失败」。
+ */
+class EmptyResponseError extends LlmError {}
+
+interface CallOpts {
+  jsonSchema: { name: string; schema: unknown } | null;
+  maxTokens: number;
+  onUsage?: (u: Usage) => void;
+  timeoutMs?: number;
+}
+
 async function callChat(
   c: LlmConfig,
   messages: { role: string; content: string }[],
-  jsonSchema: { name: string; schema: unknown } | null,
-  maxTokens: number,
+  o: CallOpts,
 ): Promise<string> {
-  const res = await fetch(`${c.baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      authorization: `Bearer ${c.apiKey}`,
-      // OpenRouter 用这两个头做来源署名，其他端点会忽略
-      'HTTP-Referer': 'https://github.com/qiayue/true-english',
-      'X-Title': 'true-english',
-    },
-    body: JSON.stringify({
-      model: c.model,
-      max_tokens: maxTokens,
-      messages,
-      ...(jsonSchema
-        ? { response_format: { type: 'json_schema', json_schema: { ...jsonSchema, strict: true } } }
-        : {}),
-    }),
-  });
+  const timeoutMs = o.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  let res: Response;
+  try {
+    res = await fetch(`${c.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${c.apiKey}`,
+        // OpenRouter 用这两个头做来源署名，其他端点会忽略
+        'HTTP-Referer': 'https://github.com/qiayue/true-english',
+        'X-Title': 'true-english',
+      },
+      // 没有超时的 fetch 会把整个调用方挂死：批改页面转圈到天荒地老，
+      // eval 跑到一半停在那里，谁都分不清是慢还是死。
+      signal: AbortSignal.timeout(timeoutMs),
+      body: JSON.stringify({
+        model: c.model,
+        max_tokens: o.maxTokens,
+        messages,
+        // OpenRouter 的用量记账：带上这个才会在响应里给 usage.cost（美元）。
+        // 只对 OpenRouter 发 —— 别的端点没见过这个字段，严格的会直接拒收。
+        ...(c.baseUrl.includes('openrouter') ? { usage: { include: true } } : {}),
+        ...(o.jsonSchema
+          ? { response_format: { type: 'json_schema', json_schema: { ...o.jsonSchema, strict: true } } }
+          : {}),
+      }),
+    });
+  } catch (e) {
+    const name = (e as Error)?.name ?? '';
+    if (name === 'TimeoutError' || name === 'AbortError') {
+      throw new LlmError(
+        `请求超时（${Math.round(timeoutMs / 1000)}s 没有响应）。` +
+          '模型确实很慢的话，用环境变量 LLM_TIMEOUT_MS 放宽。',
+      );
+    }
+    throw e;
+  }
 
   const text = await res.text();
   if (!res.ok) {
@@ -101,9 +149,47 @@ async function callChat(
   catch { throw new LlmError(`端点返回的不是 JSON：${text.slice(0, 200)}`); }
 
   if (json.error?.message) throw new LlmError(json.error.message);
-  const content = json.choices?.[0]?.message?.content;
-  if (!content) throw new LlmError('模型没有返回任何内容。可能是被安全策略拦了，或模型 ID 不对。');
+
+  if (o.onUsage && json.usage) {
+    o.onUsage({
+      prompt: Number(json.usage.prompt_tokens ?? 0),
+      completion: Number(json.usage.completion_tokens ?? 0),
+      ...(typeof json.usage.cost === 'number' ? { cost: json.usage.cost } : {}),
+    });
+  }
+
+  const choice = json.choices?.[0];
+  const content = choice?.message?.content;
+  if (!content) {
+    const fr = choice?.finish_reason;
+    const burned = Number(json.usage?.completion_tokens ?? 0);
+    // 说清楚到底发生了什么 —— 「没有返回任何内容」这句话没法排查
+    if (fr === 'length' || burned > 0) {
+      throw new EmptyResponseError(
+        `模型产出了 ${burned} 个 token 但正文是空的（finish_reason: ${fr ?? '?'}）。` +
+          '推理型模型把预算全花在思考上时会这样 —— 可以设 LLM_MAX_TOKENS 加大预算，或换个模型。',
+      );
+    }
+    throw new EmptyResponseError(
+      `模型没有返回任何内容${fr ? `（finish_reason: ${fr}）` : ''}。` +
+        '可能是上游打了个嗝、被安全策略拦了，或模型 ID 不对。',
+    );
+  }
   return content;
+}
+
+/** callChat + 对空响应重试一次。所有出站调用都走这里。 */
+async function callChatRetry(
+  c: LlmConfig,
+  messages: { role: string; content: string }[],
+  o: CallOpts,
+): Promise<string> {
+  try {
+    return await callChat(c, messages, o);
+  } catch (e) {
+    if (!(e instanceof EmptyResponseError)) throw e;
+    return callChat(c, messages, o);
+  }
 }
 
 /** 这个错是不是在说「我不支持 response_format」 */
@@ -133,7 +219,9 @@ export async function structured<S extends ZodType>(
   assertConfigured(config);
 
   const jsonSchema = z.toJSONSchema(schema) as Record<string, unknown>;
-  const maxTokens = opts.maxTokens ?? 8000;
+  // 推理型模型的思考 token 也算在 max_tokens 里，8000 可能不够正文用 ——
+  // 遇到「产出了 N 个 token 但正文是空的」就把 LLM_MAX_TOKENS 调大
+  const maxTokens = opts.maxTokens ?? Number(process.env.LLM_MAX_TOKENS ?? 8000);
   const schemaText =
     '\n\n严格按下面这个 JSON Schema 输出，只输出 JSON，不要任何其他文字：\n\n' +
     JSON.stringify(jsonSchema, null, 2);
@@ -143,18 +231,18 @@ export async function structured<S extends ZodType>(
     { role: 'user', content: opts.user },
   ];
 
+  const call = (
+    msgs: { role: string; content: string }[],
+    js: { name: string; schema: unknown } | null,
+  ) => callChatRetry(config, msgs, { jsonSchema: js, maxTokens, onUsage: opts.onUsage });
+
   let raw: string;
   try {
-    raw = await callChat(config, base, { name: 'result', schema: jsonSchema }, maxTokens);
+    raw = await call(base, { name: 'result', schema: jsonSchema });
   } catch (e) {
     if (!looksLikeSchemaUnsupported(e)) throw e;
     // 这个模型不吃 response_format，把 schema 塞进 prompt
-    raw = await callChat(
-      config,
-      [base[0]!, { role: 'user', content: opts.user + schemaText }],
-      null,
-      maxTokens,
-    );
+    raw = await call([base[0]!, { role: 'user', content: opts.user + schemaText }], null);
   }
 
   let attempt = 0;
@@ -175,8 +263,7 @@ export async function structured<S extends ZodType>(
       );
     }
 
-    raw = await callChat(
-      config,
+    raw = await call(
       [
         base[0]!,
         { role: 'user', content: opts.user + schemaText },
@@ -184,22 +271,22 @@ export async function structured<S extends ZodType>(
         { role: 'user', content: `上面的输出不符合 schema：\n${issues}\n\n请只输出修正后的完整 JSON。` },
       ],
       null,
-      maxTokens,
     );
   }
 }
 
 /** 连通性自检：不走 schema，只确认地址、key、模型三样能通 */
-export async function ping(config: LlmConfig): Promise<{ ok: true; reply: string }> {
+export async function ping(config: LlmConfig, timeoutMs = 30_000): Promise<{ ok: true; reply: string }> {
   assertConfigured(config);
-  const reply = await callChat(
+  // 连通性自检给 30s 就够 —— 它要回答的问题是「配置通不通」，
+  // 等三分钟才告诉人「不通」，那这个自检本身就是坏的。
+  const reply = await callChatRetry(
     config,
     [
       { role: 'system', content: 'You are a connectivity test. Reply with exactly: OK' },
       { role: 'user', content: 'ping' },
     ],
-    null,
-    32,
+    { jsonSchema: null, maxTokens: 32, timeoutMs },
   );
   return { ok: true, reply: reply.trim().slice(0, 80) };
 }

@@ -1,4 +1,4 @@
-import { structured } from './llm.js';
+import { structured, type Usage } from './llm.js';
 import type { LlmConfig } from './settings.js';
 import { REVIEW_SYSTEM, buildReviewPrompt } from './prompts/review.js';
 import { CARD_SYSTEM, buildCardPrompt } from './prompts/card.js';
@@ -10,14 +10,16 @@ import {
 import { scoreDifficulty } from './difficulty.js';
 import type { Card, Tweet } from './types.js';
 
-/** 批改一次回译 */
+/** 批改一次回译。onUsage 给评测算成本用，正常路径不用传。 */
 export function review(
   input: { original: string; attempt: string; glossZh?: string },
   config: LlmConfig,
+  onUsage?: (u: Usage) => void,
 ): Promise<ReviewOut> {
   return structured(ReviewSchema, {
     system: REVIEW_SYSTEM,
     user: buildReviewPrompt(input),
+    onUsage,
   }, config);
 }
 

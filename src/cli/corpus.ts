@@ -6,6 +6,7 @@
  *   pnpm corpus --check "你写的英文"  检查这条仿写复用了哪些词块
  *   pnpm corpus --add "你写的英文"    存一条仿写
  */
+import './silence.js';
 import { open, chunksByFn, framesByFn, detectReuse, saveComposition } from '../core/store.js';
 import { FUNCTIONS, type Fn } from '../core/taxonomy.js';
 import { C } from './render.js';

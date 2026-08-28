@@ -4,6 +4,7 @@
  *   pnpm card "the tweet text"
  *   pnpm card --file data/seed/tweets.json --index 0
  */
+import './silence.js';
 import fs from 'node:fs';
 import { makeCard } from '../core/review.js';
 import { scoreDifficulty } from '../core/difficulty.js';

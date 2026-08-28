@@ -4,6 +4,7 @@
  *
  *   pnpm demo --db data/demo.db
  */
+import './silence.js';
 import fs from 'node:fs';
 import { open, saveCard, saveAttempt, saveReview, saveComposition, progress } from '../core/store.js';
 import { scoreDifficulty } from '../core/difficulty.js';

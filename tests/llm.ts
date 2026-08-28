@@ -124,5 +124,91 @@ console.log('\n⑦ 连通性自检');
   m.close();
 }
 
+console.log('\n⑧ 超时：挂死的端点必须在限时内报错');
+{
+  // 一个永远不回话的端点。没有超时的话这个测试自己就会挂住 ——
+  // 这正是修它的原因：eval 跑到一半停在那儿，分不清是慢还是死。
+  const server = (await import('node:http')).createServer(() => { /* 收下请求，永不响应 */ });
+  const url = await new Promise<string>((resolve) => {
+    server.listen(0, '127.0.0.1', () => {
+      resolve(`http://127.0.0.1:${(server.address() as { port: number }).port}`);
+    });
+  });
+  const t0 = Date.now();
+  try {
+    await ping(cfg(url), 400);
+    t('应该超时报错', false);
+  } catch (e) {
+    t('超时抛 LlmError', e instanceof LlmError, String(e));
+    t('错误说清了是超时', (e as Error).message.includes('超时'), (e as Error).message.slice(0, 50));
+    t('确实在限时附近放弃（< 3s）', Date.now() - t0 < 3000, `${Date.now() - t0}ms`);
+  }
+  server.close();
+  server.closeAllConnections?.();
+}
+
+console.log('\n⑨ 用量回调：每次真实调用各触发一次，重试也算钱');
+{
+  const usage = { prompt_tokens: 100, completion_tokens: 50, cost: 0.001 };
+  const m = await mock((_b, n) =>
+    n === 1
+      ? { body: { choices: [{ message: { content: '{"answer":"bad","n":"str"}' } }], usage } }
+      : { body: { choices: [{ message: { content: '{"answer":"ok","n":9}' } }], usage } });
+  const got: { prompt: number; completion: number; cost?: number }[] = [];
+  const r = await structured(Schema, { system: 's', user: 'u', onUsage: (u) => got.push(u) }, cfg(m.url));
+  t('结果正常返回', r.answer === 'ok');
+  t('重试的那次也计入用量（2 次）', got.length === 2, `${got.length} 次`);
+  t('token 数如实转达', got[0]?.prompt === 100 && got[0]?.completion === 50);
+  t('cost 有就带上', got[0]?.cost === 0.001);
+  m.close();
+}
+
+console.log('\n⑩ OpenRouter 才发用量记账字段，别的端点不发');
+{
+  const m1 = await mock(() => reply('{"answer":"a","n":1}'));
+  await structured(Schema, { system: 's', user: 'u' }, cfg(m1.url));
+  t('普通端点不带 usage 字段', !('usage' in (m1.seen[0] as object)));
+  m1.close();
+
+  // baseUrl 里带 openrouter 就该带上记账字段 —— 用路径伪装一个
+  const m2 = await mock(() => reply('{"answer":"b","n":2}'));
+  await structured(Schema, { system: 's', user: 'u' }, { ...cfg(m2.url), baseUrl: `${m2.url}/openrouter` });
+  t('OpenRouter 端点带 usage:{include:true}',
+    JSON.stringify((m2.seen[0] as any).usage) === '{"include":true}');
+  m2.close();
+}
+
+console.log('\n⑪ 空响应自动重试一次');
+{
+  // 上游打嗝：第一次给回 200 但正文为空，第二次正常 —— 用户那次
+  // be-about 的「模型没有返回任何内容」就是这种一次性失败
+  const m = await mock((_b, n) =>
+    n === 1
+      ? { body: { choices: [{ message: { content: '' }, finish_reason: 'stop' }] } }
+      : reply('{"answer":"recovered","n":7}'));
+  const r = await structured(Schema, { system: 's', user: 'u' }, cfg(m.url));
+  t('第二次拿到结果', r.answer === 'recovered');
+  t('确实重试了（发了 2 次请求）', m.seen.length === 2, `${m.seen.length} 次`);
+  m.close();
+}
+
+console.log('\n⑫ 连续空响应 → 报错要能排查');
+{
+  const m = await mock(() => ({
+    body: { choices: [{ message: { content: '' }, finish_reason: 'length' }],
+            usage: { prompt_tokens: 100, completion_tokens: 7900 } },
+  }));
+  try {
+    await structured(Schema, { system: 's', user: 'u' }, cfg(m.url));
+    t('应该抛错', false);
+  } catch (e) {
+    const msg = (e as Error).message;
+    t('说清了 token 花在了哪', msg.includes('7900') && msg.includes('finish_reason'), msg.slice(0, 70));
+    t('给了能执行的建议', msg.includes('LLM_MAX_TOKENS'), msg.slice(0, 90));
+  }
+  t('只重试一次，不无限打钱', m.seen.length === 2, `${m.seen.length} 次`);
+  m.close();
+}
+
 console.log(`\n${failed ? `✗ ${failed} 项未通过\n` : '✓ 全部通过\n'}`);
 process.exit(failed ? 1 : 0);

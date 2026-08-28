@@ -6,6 +6,7 @@
  *
  *   pnpm report [--db data/true-english.db]
  */
+import './silence.js';
 import { open, progress } from '../core/store.js';
 import { LEAK_ZH, VERDICT_ZH, CATEGORY_ZH, type Leak, type Verdict, type Category } from '../core/taxonomy.js';
 import { C } from './render.js';

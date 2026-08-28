@@ -4,6 +4,7 @@
  *   pnpm diff --original "..." --attempt "..." [--gloss "..."]
  *   pnpm diff --case evals/cases.json --index 0
  */
+import './silence.js';
 import fs from 'node:fs';
 import { review } from '../core/review.js';
 import { renderReview } from './render.js';
