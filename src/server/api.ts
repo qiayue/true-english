@@ -8,6 +8,7 @@ import {
   detectReuse, chunksByFn, framesByFn, progress, stepsOf,
   recordStep, todayView, deleteCard, dueChunks, chunkStats,
   attemptedChunks, saveCompositionReview, compositions,
+  knownWords, addKnownWord, removeKnownWord, knownWordList,
   type StepOutcome,
 } from '../core/store.js';
 import { wordDiff, hint, type HintLevel } from '../core/steps.js';
@@ -87,8 +88,14 @@ export async function listModels(db: DatabaseSync) {
   return { models, total: models.length };
 }
 
-/** 投料：切分 + 90% 法则筛选。不调 LLM，粘贴后立刻出结果。 */
-export function ingest(raw: string) {
+/**
+ * 投料：切分 + 生词筛选。不调 LLM，粘贴后立刻出结果。
+ *
+ * 带上他自己标过「我认识」的词 —— 词频表是从电影对白统计的，
+ * 它不认识 empower 也不认识 backend，而这些是目标读者天天见的词。
+ * 与其我一直往 domain.txt 里猜词，不如让筛选器学他本人的词汇量。
+ */
+export function ingest(db: DatabaseSync, raw: string) {
   const { tweets, removed } = cleanPaste(raw);
   if (tweets.length === 0) {
     throw new ApiError(
@@ -97,7 +104,35 @@ export function ingest(raw: string) {
         : '没有解析出任何推文。',
     );
   }
-  return { removed, tweets: tweets.map((text) => ({ text, difficulty: scoreDifficulty(text) })) };
+  const extraKnown = knownWords(db);
+  return {
+    removed,
+    tweets: tweets.map((text) => ({ text, difficulty: scoreDifficulty(text, { extraKnown }) })),
+  };
+}
+
+/** 「这个词我认识」。标完立刻重算 —— 不然还得让人再点一次筛选。 */
+export function markKnown(db: DatabaseSync, word: string, texts: string[] = []) {
+  const w = addKnownWord(db, word);
+  if (!w) throw new ApiError('这不是一个词');
+  return { word: w, ...rescoreAll(db, texts) };
+}
+
+export function unmarkKnown(db: DatabaseSync, word: string, texts: string[] = []) {
+  removeKnownWord(db, word);
+  return { word: word.toLowerCase(), ...rescoreAll(db, texts) };
+}
+
+export function listKnown(db: DatabaseSync) {
+  return { words: knownWordList(db) };
+}
+
+function rescoreAll(db: DatabaseSync, texts: string[]) {
+  const extraKnown = knownWords(db);
+  return {
+    total: extraKnown.size,
+    tweets: texts.map((text) => ({ text, difficulty: scoreDifficulty(text, { extraKnown }) })),
+  };
 }
 
 /** 生成卡片并入库。需要 LLM。 */
@@ -105,6 +140,7 @@ export async function createCard(db: DatabaseSync, text: string, author?: string
   const card = await makeCard(
     { id: randomUUID().slice(0, 8), text, author, capturedAt: new Date().toISOString() },
     loadConfig(db),
+    knownWords(db),
   );
   saveCard(db, card);
   return card;
@@ -500,7 +536,7 @@ export function importCards(db: DatabaseSync, texts: string[], raw: string): Car
       steps: c.steps,
       frames: c.frames,
       chunks: c.chunks,
-      difficulty: scoreDifficulty(text),
+      difficulty: scoreDifficulty(text, { extraKnown: knownWords(db) }),
       createdAt: new Date().toISOString(),
     };
     saveCard(db, card);

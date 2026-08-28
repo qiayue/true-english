@@ -44,6 +44,16 @@ CREATE TABLE IF NOT EXISTS diff_items (
   mine TEXT, native TEXT, category TEXT NOT NULL, verdict TEXT NOT NULL,
   leak TEXT, explain_zh TEXT, rule TEXT
 );
+-- 学习者本人的已知词。
+--
+-- 通用词频表是从电影对白统计的，它不认识 empower、不认识 backend，
+-- 而这些恰恰是目标读者天天见的词。我可以一直往 domain.txt 里加词，
+-- 但那是**我在猜他的词汇量**，永远猜不准，而且每个人的还不一样。
+-- 正确的做法是让他自己说：筛选结果里点一下生词就是「这个我认识」，
+-- 下次同一个词不再算生词。过滤器该学这个人的词汇量，不是套一张固定表。
+CREATE TABLE IF NOT EXISTS known_words (
+  word TEXT PRIMARY KEY, added_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL
 );
@@ -869,4 +879,34 @@ function safeParse(s: string | null): string[] {
 
 export function compositionById(db: DatabaseSync, id: string): StoredComposition | undefined {
   return compositions(db, 1000).find((c) => c.id === id);
+}
+
+// ─────────────────────────────────────────────
+// 学习者本人的已知词
+// ─────────────────────────────────────────────
+
+export function knownWords(db: DatabaseSync): Set<string> {
+  const rows = db.prepare('SELECT word FROM known_words').all() as unknown as { word: string }[];
+  return new Set(rows.map((r) => r.word));
+}
+
+/** 标记「这个词我认识」。归一化成小写，标点去掉。 */
+export function addKnownWord(db: DatabaseSync, word: string): string | null {
+  const w = word.toLowerCase().replace(/[^a-z'-]/g, '').replace(/^['-]+|['-]+$/g, '');
+  if (w.length < 2) return null;
+  db.prepare('INSERT OR IGNORE INTO known_words (word, added_at) VALUES (?,?)')
+    .run(w, new Date().toISOString());
+  return w;
+}
+
+/** 标错了要能撤回 —— 不然一次手滑就永久放宽了筛选 */
+export function removeKnownWord(db: DatabaseSync, word: string): boolean {
+  const r = db.prepare('DELETE FROM known_words WHERE word = ?').run(word.toLowerCase());
+  return Number(r.changes ?? 0) > 0;
+}
+
+export function knownWordList(db: DatabaseSync): { word: string; addedAt: string }[] {
+  return db
+    .prepare('SELECT word, added_at AS addedAt FROM known_words ORDER BY added_at DESC')
+    .all() as unknown as { word: string; addedAt: string }[];
 }

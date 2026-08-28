@@ -19,7 +19,7 @@
     "start": "tsx src/server/index.ts",
     "check": "node scripts/check-ui.mjs && tsc --noEmit && npm run test",
     "smoke": "node scripts/smoke.mjs",
-    "test": "tsx tests/schedule.ts && tsx tests/paste.ts && tsx tests/cloze.ts && tsx tests/delete.ts && tsx tests/plan.ts && tsx tests/chunks.ts && tsx tests/llm.ts",
+    "test": "tsx tests/schedule.ts && tsx tests/paste.ts && tsx tests/cloze.ts && tsx tests/delete.ts && tsx tests/plan.ts && tsx tests/chunks.ts && tsx tests/known.ts && tsx tests/llm.ts",
     "audit": "node scripts/audit.mjs",
     "verify": "npm run check && bash scripts/verify.sh"
   },

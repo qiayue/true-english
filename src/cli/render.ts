@@ -132,9 +132,12 @@ export function renderDifficulty(text: string, d: Difficulty): string {
   L.push('');
   L.push(`${C.cyan}${text}${C.reset}`);
   L.push('');
+  // 判定看的是生词个数（一句最多一个，长文本按 10% 放宽），
+  // 所以额度要摆出来 —— 只报一个百分比，看的人对不上是怎么算出来的
+  const allowance = Math.max(1, Math.floor(d.words * 0.1));
   L.push(
     `${mark}  ${C.gray}L${d.level}  ${d.words} 词 / ${d.sentences} 句  ` +
-      `已知词 ${(d.coverage * 100).toFixed(0)}%${C.reset}`,
+      `生词 ${d.rareWords.length}/${allowance}${C.reset}`,
   );
   if (d.rareWords.length > 0) {
     L.push(`${C.gray}生词  ${C.yellow}${d.rareWords.join(', ')}${C.reset}`);

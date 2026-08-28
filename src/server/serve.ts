@@ -82,6 +82,7 @@ async function route(req: http.IncomingMessage, url: URL): Promise<unknown> {
     return api.corpus(db, url.searchParams.get('fn') ?? undefined);
   }
   if (m === 'GET' && pathname === '/api/progress') return api.report(db);
+  if (m === 'GET' && pathname === '/api/known') return api.listKnown(db);
   if (m === 'GET' && pathname === '/api/compose/deck') {
     const n = Number(url.searchParams.get('n') ?? '');
     return api.composeDeck(db, Number.isFinite(n) && n > 0 ? n : 3,
@@ -123,7 +124,14 @@ async function route(req: http.IncomingMessage, url: URL): Promise<unknown> {
     if (pathname === '/api/settings/models') return api.listModels(db);
     if (pathname === '/api/settings/clear-key') return api.dropKey(db);
 
-    if (pathname === '/api/ingest') return api.ingest(str(body.text, 'text'));
+    if (pathname === '/api/ingest') return api.ingest(db, str(body.text, 'text'));
+
+    if (pathname === '/api/known') {
+      const texts = Array.isArray(body.texts) ? body.texts.map((x) => String(x)) : [];
+      return body.remove === true
+        ? api.unmarkKnown(db, str(body.word, 'word'), texts)
+        : api.markKnown(db, str(body.word, 'word'), texts);
+    }
 
     if (pathname === '/api/cards/request') return api.cardRequest(strArray(body.texts, 'texts'));
     if (pathname === '/api/cards/import') {

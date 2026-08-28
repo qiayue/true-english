@@ -18,13 +18,16 @@ if (typeof args.file === 'string') {
     const d = scoreDifficulty(t.text);
     if (d.usable) usable++;
     const mark = d.usable ? `${C.green}✓${C.reset}` : `${C.red}✗${C.reset}`;
+    // 显示生词个数而不是百分比：判定用的就是个数，
+    // 摆一个不参与判定的百分比在这里，看的人只会去对不上号
+    const n = d.rareWords.length;
     console.log(
-      `${mark} ${C.gray}L${d.level}${C.reset} ${String(Math.round(d.coverage * 100)).padStart(3)}%  ` +
-        `${t.text.slice(0, 58).replace(/\n/g, ' ')}${t.text.length > 58 ? '…' : ''}`,
+      `${mark} ${C.gray}L${d.level}${C.reset} ${String(n).padStart(2)} 生词  ` +
+        `${t.text.slice(0, 56).replace(/\n/g, ' ')}${t.text.length > 56 ? '…' : ''}`,
     );
     if (!d.usable) console.log(`     ${C.gray}${d.reason}${C.reset}`);
   }
-  console.log(`\n${C.bold}${usable}/${items.length}${C.reset} 条通过 90% 法则\n`);
+  console.log(`\n${C.bold}${usable}/${items.length}${C.reset} 条可用\n`);
 } else {
   const text = typeof args._ === 'string' ? args._ : '';
   if (!text) die('用法: pnpm score "tweet text"  |  pnpm score --file <json>');

@@ -195,6 +195,8 @@ textarea:disabled{background:var(--paper);color:var(--faint);cursor:default;bord
     <span class="faint mono" id="ingest-hint"></span>
   </div>
   <div id="ingest-out" class="list"></div>
+  <p class="hint" id="known-note">词频表是按电影对白统计的，它不认识 <code>empower</code>、<code>backend</code> 这类词。
+     <strong>标红的生词点一下就是「这个我认识」</strong> —— 筛选器会记住，往后按你的词汇量算。</p>
 
   <div id="card-flow" class="hidden" style="display:flex;flex-direction:column;gap:.9rem">
     <div class="card">
@@ -565,28 +567,61 @@ $('#btn-ingest').onclick = async () => {
   const out = $('#ingest-out');
   try {
     const { tweets, removed } = await call('/api/ingest', { text: $('#raw').value });
-    // 通过筛选的默认勾上，但可以取消 —— 不该替用户决定今天练哪几条
-    out.innerHTML = tweets.map((t, i) => {
-      const d = t.difficulty;
-      return d.usable
-        ? `<label class="item" style="cursor:pointer">
-             <input type="checkbox" class="pick" data-i="${i}" checked style="width:auto;margin-top:.3rem">
-             <span><span class="mono">${esc(t.text)}</span><br>
-             <span class="faint" style="font-size:.82rem">${esc(d.reason)}</span></span></label>`
-        : `<div class="item" style="cursor:default;opacity:.6">
-             <span class="mk zhu">✗</span>
-             <span><span class="mono">${esc(t.text)}</span><br>
-             <span class="faint" style="font-size:.82rem">${esc(d.reason)}</span></span></div>`;
-    }).join('');
-    ALL_TWEETS = tweets;
-    out.querySelectorAll('.pick').forEach((c) => c.onchange = syncPicked);
-    syncPicked();
-    const usable = tweets.filter((t) => t.difficulty.usable).length;
-    $('#ingest-hint').innerHTML = `${usable}/${tweets.length} 条通过` +
-      (removed ? `　<span class="faint">（清掉了 ${removed} 行界面噪音）</span>` : '');
+    LAST_REMOVED = removed;
+    renderIngest(tweets);
     $('#btn-card-auto').title = AUTO ? '' : '还没配 LLM，去「设置」';
   } catch (e) { showErr(out, e); }
 };
+
+let LAST_REMOVED = 0;
+
+function renderIngest(tweets) {
+  const out = $('#ingest-out');
+  // 通过筛选的默认勾上，但可以取消 —— 不该替用户决定今天练哪几条
+  out.innerHTML = tweets.map((t, i) => {
+    const d = t.difficulty;
+    const words = (d.rareWords ?? []).length
+      ? `<br><span class="faint" style="font-size:.8rem">生词　</span>` +
+        d.rareWords.map((w) => `<button class="newword" data-word="${esc(w)}">${esc(w)}</button>`).join('')
+      : '';
+    return d.usable
+      ? `<label class="item" style="cursor:pointer">
+           <input type="checkbox" class="pick" data-i="${i}" checked style="width:auto;margin-top:.3rem">
+           <span><span class="mono">${esc(t.text)}</span><br>
+           <span class="faint" style="font-size:.82rem">${esc(d.reason)}</span>${words}</span></label>`
+      : `<div class="item" style="cursor:default">
+           <span class="mk zhu">✗</span>
+           <span><span class="mono" style="opacity:.7">${esc(t.text)}</span><br>
+           <span class="faint" style="font-size:.82rem">${esc(d.reason)}</span>${words}</span></div>`;
+  }).join('');
+
+  ALL_TWEETS = tweets;
+  out.querySelectorAll('.pick').forEach((c) => c.onchange = syncPicked);
+
+  // 点一个生词 = 「这个我认识」。标完当场重算，不用再点一次筛选 ——
+  // 让人为了看到结果再操作一步，那个功能基本不会有人用。
+  out.querySelectorAll('.newword').forEach((b) => b.onclick = async (e) => {
+    e.preventDefault(); e.stopPropagation();
+    try {
+      const r = await call('/api/known', { word: b.dataset.word, texts: tweets.map((t) => t.text) });
+      renderIngest(r.tweets);
+      $('#known-note').innerHTML =
+        `已记下 <span class="mono">${esc(r.word)}</span>，往后不再算生词。` +
+        `　<button class="link" id="btn-unknown">标错了，撤回</button>` +
+        `　<span class="faint">你的已知词：${r.total} 个</span>`;
+      $('#btn-unknown').onclick = async () => {
+        const back = await call('/api/known', { word: r.word, remove: true, texts: tweets.map((t) => t.text) });
+        renderIngest(back.tweets);
+        $('#known-note').innerHTML = `<span class="faint">已撤回 ${esc(r.word)}。</span>`;
+      };
+    } catch (err) { showErr($('#known-note'), err); }
+  });
+
+  syncPicked();
+  const usable = tweets.filter((t) => t.difficulty.usable).length;
+  $('#ingest-hint').innerHTML = `${usable}/${tweets.length} 条通过` +
+    (LAST_REMOVED ? `　<span class="faint">（清掉了 ${LAST_REMOVED} 行界面噪音）</span>` : '');
+}
 
 $('#btn-card-auto').onclick = async () => {
   const msg = $('#card-msg'); msg.innerHTML = '<p>生成中…</p>';

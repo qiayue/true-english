@@ -21,9 +21,16 @@ export function review(
   }, config);
 }
 
-/** 从一条推文生成每日卡片 */
-export async function makeCard(tweet: Tweet, config: LlmConfig): Promise<Card> {
-  const difficulty = scoreDifficulty(tweet.text);
+/**
+ * 从一条推文生成每日卡片。
+ *
+ * `extraKnown` 要和投料筛选时用的是同一份，否则会出现
+ * 「筛选时说 L2 可用，入库之后变成 L4」这种自相矛盾。
+ */
+export async function makeCard(
+  tweet: Tweet, config: LlmConfig, extraKnown?: Set<string>,
+): Promise<Card> {
+  const difficulty = scoreDifficulty(tweet.text, extraKnown ? { extraKnown } : {});
   const out: CardOut = await structured(CardSchema, {
     system: CARD_SYSTEM,
     user: buildCardPrompt(tweet.text),

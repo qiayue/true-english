@@ -118,6 +118,28 @@ const hint = await p.textContent('#ingest-hint');
 check('投料筛选', hint.includes('1/2'), hint);
 check('清掉了界面噪音', hint.includes('界面噪音'), hint);
 check('通过的可勾选', (await p.locator('#raw ~ * .pick, #ingest-out .pick').count()) === 1);
+
+// 「这个词我认识」：词频表是电影对白统计的，不认识 empower 也不认识 backend。
+// 与其一直往表里猜词，不如让筛选器学他本人的词汇量。
+await p.fill('#raw', 'Our team will zorbulate the whole pipeline before the next release ships.');
+await p.click('#btn-ingest'); await p.waitForTimeout(600);
+const nw = p.locator('#ingest-out .newword').first();
+check('生词标出来且可点', await nw.isVisible(), await p.textContent('#ingest-out'));
+await nw.click(); await p.waitForTimeout(700);
+check('标完当场重算，不用再点一次筛选',
+  (await p.textContent('#known-note')).includes('已记下'), await p.textContent('#known-note'));
+check('标过的词不再算生词',
+  (await p.locator('#ingest-out .newword[data-word="zorbulate"]').count()) === 0,
+  await p.textContent('#ingest-out'));
+await p.click('#btn-unknown'); await p.waitForTimeout(700);
+check('标错了能撤回', (await p.textContent('#known-note')).includes('已撤回'),
+  await p.textContent('#known-note'));
+check('撤回后又算回生词',
+  (await p.locator('#ingest-out .newword[data-word="zorbulate"]').count()) === 1);
+
+// 回到正常投料，后面的流程接着走
+await p.fill('#raw', TWEET);
+await p.click('#btn-ingest'); await p.waitForTimeout(600);
 await p.click('#btn-card-manual'); await p.waitForTimeout(400);
 check('导出卡片请求', (await p.textContent('#card-payload')).length > 100);
 

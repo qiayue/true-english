@@ -6,6 +6,11 @@
 # 判定标准：一个会来用这个 app 的人（读技术/产品类推特的中文母语学习者）
 # 几乎必然认识它。不认识就不该收进来。
 #
+# 这张表**只是起点**，不是最终答案 —— 我在这里加词等于我在猜他的词汇量，
+# 而且每个人的还不一样。真正的机制是投料页那个「这个词我认识」：
+# 点一下就进 known_words 表，往后按他本人的词汇量算。
+# 拿不准的词宁可留给他自己标，别替他决定。
+#
 # 软件与工程
 api backend frontend bug bugs debug debugging deploy deployment repo repos
 codebase refactor refactoring commit commits merge branch database server
@@ -27,3 +32,22 @@ intentional deliberate incremental sustainable scalable robust fragile
 ambiguous ambiguity arbitrary explicit implicit granular
 underrated overrated overthink overthinking procrastinate procrastination
 burnout momentum leverage bandwidth alignment
+
+# 界面与设备（外来词，几乎都是直接音译或天天见）
+app apps ui ux browser download downloads upload uploads online offline
+username password login logout inbox sidebar dropdown checkbox shortcut
+spreadsheet calendar reminder notification tab tabs
+# AI 与算力
+ai llm llms gpu gpus cpu chatbot prompt prompts token tokens dataset datasets
+benchmark benchmarks model models training
+# 开源与工具
+github plugin plugins toolkit saas opensource devtools cli sdk repo repos
+pipeline pipelines container containers kubernetes docker linter linting
+# 内容与社交
+blog blogs blogging podcast podcasts subscribe subscriber subscribers
+follower followers audience
+# 使命/产品文案里的高频动词（对白语料罕见，产品写作满屏都是）
+empower empowers empowering unlock unlocks unlocking enable enables
+onboard streamline amplify accelerate
+# 融资与经营
+investor investors funding revenue pitch

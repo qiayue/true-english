@@ -196,22 +196,39 @@ export function scoreDifficulty(text: string, opts: ScoreOptions = {}): Difficul
   const coverage = words === 0 ? 0 : known / words;
   const sentences = countSentences(text);
   const flags = structuralFlags(text);
+  const uniqueRare = [...new Set(rare)];
 
+  // 生词额度：**按个数算，不按比例算**。
+  //
+  // 90% 法则来自阅读研究，它的分母是几百词的篇章。原样搬到一条推文上会失真：
+  // 9 个词里有 1 个生词就是 89%，于是**任何 10 词以下的句子都必须一个生词都没有**——
+  // 而结构筛选又只挡掉 5 词以下的，也就是说 5–9 词这一段被悄悄提高成了「100% 认识」。
+  // 那恰恰是初学者最该练的材料：短到能整句吃下去，一个新词正好。
+  //
+  //   "Join our mission to empower the world to design."
+  //   9 词 / 1 个生词 / 89% —— 按老规则直接毙掉，可这就是理想的起步句。
+  //
+  // 所以：一句话至少允许一个生词，再长按 10% 放宽。对 10 词以上的文本，
+  // 这和原来的 90% 法则完全等价 —— 只是把短句那段的隐性 100% 门槛拿掉。
+  const allowance = Math.max(1, Math.floor(words * 0.1));
+  const over = uniqueRare.length > allowance;
+
+  // 分级同样改看生词个数。短句的比例分母太小、噪音太大：
+  // 上面那个 9 词句按比例算会落到 L5（最难），而它其实是 L2。
   let level: Difficulty['level'];
-  if (words <= 15 && sentences <= 1 && coverage >= 0.98) level = 1;
-  else if (words <= 30 && sentences <= 2 && coverage >= 0.95) level = 2;
-  else if (words <= 50 && sentences <= 4 && coverage >= 0.92) level = 3;
-  else if (words <= 80 && coverage >= 0.9) level = 4;
+  if (words <= 15 && sentences <= 1 && uniqueRare.length === 0) level = 1;
+  else if (words <= 30 && sentences <= 2 && uniqueRare.length <= 1) level = 2;
+  else if (words <= 50 && sentences <= 4 && uniqueRare.length <= allowance) level = 3;
+  else if (words <= 80 && uniqueRare.length <= allowance) level = 4;
   else level = 5;
 
-  const belowRule = coverage < 0.9;
-  const usable = !belowRule && flags.length === 0;
+  const usable = !over && flags.length === 0;
 
   const problems: string[] = [];
-  if (belowRule) {
+  if (over) {
     problems.push(
-      `生词率过高（已知词 ${(coverage * 100).toFixed(0)}% < 90%）：` +
-        `${[...new Set(rare)].slice(0, 6).join(', ')}`,
+      `生词太多（${uniqueRare.length} 个，${words} 词的句子最多 ${allowance} 个）：` +
+        `${uniqueRare.slice(0, 6).join(', ')}`,
     );
   }
   problems.push(...flags);
@@ -219,14 +236,15 @@ export function scoreDifficulty(text: string, opts: ScoreOptions = {}): Difficul
   const reason =
     problems.length > 0
       ? problems.join('；')
-      : `可用 · L${level} · ${words} 词 / ${sentences} 句 / 已知词 ${(coverage * 100).toFixed(0)}%`;
+      : `可用 · L${level} · ${words} 词 / ${sentences} 句` +
+        (uniqueRare.length ? ` / 生词 ${uniqueRare.join(', ')}` : ' / 没有生词');
 
   return {
     level,
     words,
     sentences,
     coverage: Number(coverage.toFixed(4)),
-    rareWords: [...new Set(rare)],
+    rareWords: uniqueRare,
     flags,
     usable,
     reason,
