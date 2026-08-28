@@ -104,9 +104,22 @@ pre.payload{background:var(--surface);border:1px solid var(--rule);border-radius
 .ctx{font-family:var(--mono);font-size:.8rem;color:var(--faint);line-height:1.7;
   padding-left:.7rem;border-left:2px solid var(--rule)}
 .ctx b{color:var(--soft);font-weight:400}
-.covered{background:repeating-linear-gradient(45deg,var(--surface-2),var(--surface-2) 6px,transparent 6px,transparent 12px);
-  border:1px dashed var(--rule);border-radius:3px;padding:.7rem .85rem;
-  font-size:.8rem;color:var(--faint);text-align:center;letter-spacing:.05em}
+/* 答案槽：「看」和「遮住」是**同一个盒子的两个状态**，不是两个盒子。
+   遮住时文字仍然占位（visibility:hidden），所以盒子高度分毫不变 ——
+   页面不跳，人才会觉得「原文被盖上了」，而不是「换了一屏」。
+   之前是把整个 .card 换成一条矮矮的斜纹带，高度差一半，
+   下面的输入框和按钮跟着上蹿，看起来就是另一个界面。 */
+.ansbox{position:relative}
+.ansbox.masked > *{visibility:hidden}
+.ansbox.masked::after{content:attr(data-mask);position:absolute;inset:0;
+  display:grid;place-items:center;border-radius:2px;text-align:center;padding:0 1rem;
+  background:repeating-linear-gradient(45deg,var(--surface-2),var(--surface-2) 6px,transparent 6px,transparent 12px);
+  color:var(--faint);font-size:.8rem;letter-spacing:.05em}
+/* 提示行占定高度，否则长句换成「凭记忆写一遍。」时整屏往上跳 */
+.cue{min-height:2.9rem}
+/* 还轮不到你打字的时候，输入框留在原位但明确地「不可用」——
+   收起来会让布局塌一截，等于告诉人「这是另一个页面」 */
+textarea:disabled{background:var(--paper);color:var(--faint);cursor:default;border-style:dashed}
 .cue b{color:var(--ink)}
 .tries{font-family:var(--mono);font-size:.72rem;color:var(--faint)}
 .hit{border-left:3px solid var(--qing);background:var(--qing-wash);padding:.6rem .85rem;
@@ -791,19 +804,32 @@ function setPhase(p) {
   const last = CARD?.steps && STEP === CARD.steps.length - 1;
   $('#btn-step-primary').textContent =
     p === 'hit' && last ? '连起来写整条 →' : cfg.primary;
-  // study 阶段没什么可打的，把输入框收起来，屏幕上只留「看」这一件事
-  $('#step-input').classList.toggle('hidden', p === 'hit' || p === 'study');
+  // 输入框**始终在原位**，只是该看的时候锁上。
+  // 收起来会让整块塌下去、按钮往上蹿，人看到的是「另一个界面」，
+  // 而这一级要传达的其实是「同一句话，现在盖住了」。
+  const locked = p === 'study' || p === 'hit';
+  const inp = $('#step-input');
+  inp.disabled = locked;
+  inp.placeholder = p === 'hit' ? '这一句拿下了' : p === 'study' ? '先看上面，记住它' : '只写这一小段';
   // 答案已经看过了就别再给提示，那是给还没看过的人的
   $('#btn-step-hint').classList.toggle('hidden', p !== 'write');
   $('#btn-step-accept').classList.toggle('hidden', p !== 'study');
   $('#btn-step-peek').classList.toggle('hidden', p !== 'recall');
   // 试了三次还没对，抄写才有意义 —— 再瞪着看已经没用了
   $('#btn-step-copy').classList.toggle('hidden', !(p === 'study' && TRIES >= 3));
-  if (p !== 'hit' && p !== 'study') $('#step-input').focus();
+  if (!locked) inp.focus();
 }
 
-function hideAnswer() {
-  $('#step-out').innerHTML = `<div class="covered">原文已遮起</div>`;
+/**
+ * 盖住 / 揭开答案。
+ *
+ * 注意是给同一个节点加个 class，不是把它换掉。换掉的话「再看一眼」
+ * 就得知道刚才那里放的是原文还是对照结果、然后各自重新渲染一遍 ——
+ * 那正是之前「照抄级点再看一眼没反应」的成因：它只会重画 diff，
+ * 而照抄级压根没有 diff。盖上/揭开是同一个动作，就不会有这种分支。
+ */
+function maskAnswer(on) {
+  $('#step-out').querySelector('.ansbox')?.classList.toggle('masked', on);
 }
 
 function renderStep() {
@@ -834,7 +860,7 @@ async function enterCopy() {
   try {
     const d = await call(`/api/cards/${CARD.id}/steps/${STEP}/copy`);
     LAST_DIFF = null;
-    $('#step-out').innerHTML = `<div class="card">
+    $('#step-out').innerHTML = `<div class="card ansbox" data-mask="原文已遮起　·　凭记忆打出来">
       <span class="faint mono" style="font-size:.68rem;letter-spacing:.1em">原文 · ${d.words} 个词</span>
       <div class="mono qing" style="font-size:1rem;line-height:1.9">${esc(d.en)}</div></div>`;
     setPhase('study');
@@ -851,7 +877,7 @@ function renderDiff(d) {
   // 其实结构差得很远。多写得多就必须明说，否则这个数字在骗人。
   const extra = d.ops.filter((o) => o.type === 'del').length;
   const misleading = extra >= Math.max(3, d.total * 0.5);
-  $('#step-out').innerHTML = `<div class="card">
+  $('#step-out').innerHTML = `<div class="card ansbox" data-mask="对照结果已遮起　·　凭记忆重写一遍">
     <div class="row" style="justify-content:space-between">
       <span class="faint mono" style="font-size:.68rem;letter-spacing:.1em">对照</span>
       <span class="mono" style="font-size:.8rem">命中 ${d.hit}/${d.total}${extra ? `　多写 ${extra}` : ''}</span></div>
@@ -888,7 +914,7 @@ async function doCheck() {
 }
 
 $('#btn-step-primary').onclick = () => {
-  if (PHASE === 'study') { hideAnswer(); setPhase('recall'); return; }
+  if (PHASE === 'study') { maskAnswer(true); setPhase('recall'); return; }
   if (PHASE === 'hit') {
     if (STEP < CARD.steps.length - 1) { STEP++; renderStep(); return; }
     // 阶梯走完 → 整段。小步是建立手感，整条才是产生洞察的地方。
@@ -931,17 +957,9 @@ $('#btn-step-accept').onclick = () => {
   setPhase('hit');
 };
 
-/**
- * 再看一眼。
- *
- * 两级支架要看的东西不一样：逐句级看的是上次的对照结果，
- * 照抄级根本没有对照 —— 它要看的是原文本身。
- * 原来只写了 renderDiff(LAST_DIFF)，而照抄级的 LAST_DIFF 是 null，
- * 于是阶段切回「看」，却什么都没显示。
- */
-$('#btn-step-peek').onclick = async () => {
-  if (STAGE === 'copy') { await enterCopy(); return; }
-  if (LAST_DIFF) renderDiff(LAST_DIFF);
+/** 再看一眼 = 把遮罩揭开。盖的是原文还是对照结果，这里不需要知道。 */
+$('#btn-step-peek').onclick = () => {
+  maskAnswer(false);
   setPhase('study');
 };
 

@@ -9,6 +9,7 @@
  *
  * 场景：settings / today / copy / cloze / write / retry / recall / review /
  *       finish / compose / composed / report
+ *       （copy 和 copy-masked 是同一个界面的两个状态，对照着看）
  * 输出到 /tmp/shots/
  */
 import { chromium } from 'playwright';
@@ -86,6 +87,10 @@ await list.first().click();
 await p.locator('#ladder').waitFor({ state: 'visible', timeout: 10_000 });
 await p.waitForTimeout(500);
 await shot('copy');
+// 同一个界面的第二个状态：答案盖上、输入框解锁，布局一动不动
+await p.click('#btn-step-primary'); await p.waitForTimeout(400);
+await shot('copy-masked');
+await p.click('#btn-step-peek'); await p.waitForTimeout(300);
 await p.click('#btn-mode-toggle').catch(()=>{}); await p.waitForTimeout(200);
 await p.click('#mode-switch button[data-stage="cloze"]').catch(()=>{}); await p.waitForTimeout(700);
 await shot('cloze');

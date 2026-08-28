@@ -159,21 +159,37 @@ check('新卡默认走照抄级', (await p.textContent('#stage-tag')).includes('
 
 // ── 照抄级：看 → 遮 → 打 ──
 await p.locator('#step-out').waitFor({ state: 'visible', timeout: 10_000 });
-check('照抄级先给原文看', (await p.textContent('#step-out')).includes(STEP_ANSWERS[0]));
-check('照抄级此时不给输入框', !(await p.isVisible('#step-input')), '看的时候不该能打字');
+check('照抄级先给原文看', await p.isVisible('#step-out .ansbox .mono'));
 check('照抄的主按钮是「遮住」', (await p.textContent('#btn-step-primary')).includes('遮住'));
-await p.click('#btn-step-primary'); await p.waitForTimeout(350);
-check('遮住后原文没了', !(await p.textContent('#step-out')).includes(STEP_ANSWERS[0]));
-check('遮住后可以打字', await p.isVisible('#step-input'));
+
+// 「看」和「打」是同一个界面的两个状态，不是两个界面。
+// 判据是**布局不动**：输入框一直在原位（只是锁着），
+// 答案槽被盖住时高度不变，于是按钮不会上蹿。
+check('看的时候输入框在原位但锁着',
+  (await p.isVisible('#step-input')) && (await p.isDisabled('#step-input')));
+const boxBefore = await p.locator('#step-out .ansbox').boundingBox();
+const btnBefore = await p.locator('#btn-step-primary').boundingBox();
+
+await p.click('#btn-step-primary'); await p.waitForTimeout(400);
+
+check('遮住后读不到原文了', !(await p.isVisible('#step-out .ansbox .mono')));
+check('遮住后可以打字', !(await p.isDisabled('#step-input')));
+const boxAfter = await p.locator('#step-out .ansbox').boundingBox();
+const btnAfter = await p.locator('#btn-step-primary').boundingBox();
+check('★ 遮住前后答案槽高度不变',
+  Math.abs(boxBefore.height - boxAfter.height) < 2,
+  `${Math.round(boxBefore.height)} → ${Math.round(boxAfter.height)}`);
+check('★ 遮住前后按钮不移位（一个界面，不是两个）',
+  Math.abs(btnBefore.y - btnAfter.y) < 4,
+  `y ${Math.round(btnBefore.y)} → ${Math.round(btnAfter.y)}`);
+
 // 「再看一眼」在照抄级要能把原文重新拿出来 —— 这一级没有 diff 可渲染，
 // 曾经因此点了没反应
 check('遮住后有「再看一眼」', await p.isVisible('#btn-step-peek'));
 await p.click('#btn-step-peek'); await p.waitForTimeout(400);
-check('★ 再看一眼能重新显示原文',
-  (await p.textContent('#step-out')).includes(STEP_ANSWERS[0]),
-  (await p.textContent('#step-out')).slice(0, 40));
+check('★ 再看一眼能重新显示原文', await p.isVisible('#step-out .ansbox .mono'));
 await p.click('#btn-step-primary'); await p.waitForTimeout(350);
-check('再遮住又能打字', await p.isVisible('#step-input'));
+check('再遮住又能打字', !(await p.isDisabled('#step-input')));
 await p.fill('#step-input', STEP_ANSWERS[0]);
 await p.keyboard.press('Enter'); await p.waitForTimeout(500);
 check('照抄打对了判过', (await p.textContent('#btn-step-primary')).includes('下一步'),
